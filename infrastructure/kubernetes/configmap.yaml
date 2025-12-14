@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: gennet-system
+data:
+  redis_url: "redis://redis:6379/0"
+  neo4j_uri: "bolt://neptune-cluster:8182"
+  s3_bucket: "gennet-data"
+  s3_endpoint: "s3.amazonaws.com"
+  api_base_url: "http://api-gateway:8000"
+  frontend_url: "http://web:3000"
+  environment: "production"
+

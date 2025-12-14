@@ -1,0 +1,96 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grn-service
+  namespace: gennet-system
+  labels:
+    app: grn-service
+    component: core
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: grn-service
+  template:
+    metadata:
+      labels:
+        app: grn-service
+    spec:
+      containers:
+      - name: grn-service
+        image: gennet/grn-service:latest
+        ports:
+        - containerPort: 8000
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: url
+        - name: NEO4J_URI
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: neo4j_uri
+        - name: NEO4J_USER
+          valueFrom:
+            secretKeyRef:
+              name: neo4j-credentials
+              key: user
+        - name: NEO4J_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: neo4j-credentials
+              key: password
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: aws-credentials
+              key: access_key_id
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: aws-credentials
+              key: secret_access_key
+        - name: S3_BUCKET_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: s3_bucket
+        - name: JWT_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: jwt_secret
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grn-service
+  namespace: gennet-system
+spec:
+  selector:
+    app: grn-service
+  ports:
+  - port: 8000
+    targetPort: 8000
+

@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: workflow-service
+  namespace: gennet-system
+  labels:
+    app: workflow-service
+    component: core
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: workflow-service
+  template:
+    metadata:
+      labels:
+        app: workflow-service
+    spec:
+      containers:
+      - name: workflow-service
+        image: gennet/workflow-service:latest
+        ports:
+        - containerPort: 8000
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: url
+        - name: QUALITATIVE_SERVICE_URL
+          value: "http://qualitative-service:8000"
+        - name: HYBRID_SERVICE_URL
+          value: "http://hybrid-service:8000"
+        - name: ML_SERVICE_URL
+          value: "http://ml-service:8000"
+        - name: JWT_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: jwt_secret
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: workflow-service
+  namespace: gennet-system
+spec:
+  selector:
+    app: workflow-service
+  ports:
+  - port: 8000
+    targetPort: 8000
+

@@ -1,0 +1,173 @@
+{
+  "info": {
+    "name": "GenNet API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{auth_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Register",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register?username=testuser&email=test@example.com&password=testpass123",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "register"],
+              "query": [
+                {"key": "username", "value": "testuser"},
+                {"key": "email", "value": "test@example.com"},
+                {"key": "password", "value": "testpass123"}
+              ]
+            }
+          }
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.environment.set('auth_token', jsonData.access_token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {"key": "username", "value": "testuser"},
+                {"key": "password", "value": "testpass123"}
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/token",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "token"]
+            }
+          }
+        },
+        {
+          "name": "Get Current User",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/me",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "me"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Networks",
+      "item": [
+        {
+          "name": "List Networks",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/networks",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "networks"]
+            }
+          }
+        },
+        {
+          "name": "Create Network",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Test Network\",\n  \"description\": \"A test network\",\n  \"nodes\": [\n    {\"id\": \"gene1\", \"label\": \"Gene 1\", \"node_type\": \"gene\"},\n    {\"id\": \"gene2\", \"label\": \"Gene 2\", \"node_type\": \"gene\"}\n  ],\n  \"edges\": [\n    {\"source\": \"gene1\", \"target\": \"gene2\", \"edge_type\": \"activates\"}\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/networks",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "networks"]
+            }
+          }
+        },
+        {
+          "name": "Get Network",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/networks/{{network_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "networks", "{{network_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Workflows",
+      "item": [
+        {
+          "name": "Create Workflow",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Test Workflow\",\n  \"workflow_type\": \"qualitative\",\n  \"network_id\": \"{{network_id}}\",\n  \"parameters\": {}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/workflows",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "workflows"]
+            }
+          }
+        },
+        {
+          "name": "Get Workflow Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/workflows/{{workflow_id}}/status",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "workflows", "{{workflow_id}}", "status"]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000"
+    },
+    {
+      "key": "auth_token",
+      "value": ""
+    }
+  ]
+}
+
