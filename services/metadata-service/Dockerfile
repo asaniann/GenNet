@@ -4,10 +4,15 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y gcc postgresql-client && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+# Copy shared directory first (needed by all services)
+COPY shared /app/shared
+
+# Copy requirements
+COPY services/metadata-service/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+# Copy application code
+COPY services/metadata-service /app
 
 EXPOSE 8000
 

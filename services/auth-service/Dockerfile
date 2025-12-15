@@ -8,12 +8,15 @@ RUN apt-get update && apt-get install -y \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
+# Copy shared directory first (needed by all services)
+COPY shared /app/shared
+
 # Copy requirements
-COPY requirements.txt .
+COPY services/auth-service/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY . .
+COPY services/auth-service /app
 
 # Expose port
 EXPOSE 8000

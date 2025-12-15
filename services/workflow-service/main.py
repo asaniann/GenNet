@@ -12,7 +12,7 @@ from datetime import datetime
 import logging
 import sys
 import os
-from models import Workflow, WorkflowCreate, WorkflowResponse, Job, JobStatus
+from models import Workflow, WorkflowCreate, WorkflowResponse, JobStatus
 from database import get_db, init_db
 from workflow_engine import WorkflowEngine
 from dependencies import get_current_user_id

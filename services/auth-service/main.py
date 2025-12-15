@@ -27,9 +27,10 @@ logging.basicConfig(
     ]
 )
 
-# Import correlation ID middleware
+# Import correlation ID middleware and cache
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from shared.logging_middleware import CorrelationIDMiddleware, get_logger
+from shared.cache import cached
 
 app = FastAPI(
     title="GenNet Auth Service",

@@ -1,13 +1,12 @@
 # Docker Compose configuration for services
 # This extends docker-compose.yml with actual service containers
 
-version: '3.8'
-
 services:
   auth-service:
     build:
-      context: ./services/auth-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/auth-service/Dockerfile
+    image: gennet/auth-service:latest
     ports:
       - "8001:8000"
     environment:
@@ -28,8 +27,9 @@ services:
 
   grn-service:
     build:
-      context: ./services/grn-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/grn-service/Dockerfile
+    image: gennet/grn-service:latest
     ports:
       - "8002:8000"
     environment:
@@ -54,8 +54,9 @@ services:
 
   workflow-service:
     build:
-      context: ./services/workflow-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/workflow-service/Dockerfile
+    image: gennet/workflow-service:latest
     ports:
       - "8003:8000"
     environment:
@@ -75,8 +76,9 @@ services:
 
   qualitative-service:
     build:
-      context: ./services/qualitative-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/qualitative-service/Dockerfile
+    image: gennet/qualitative-service:latest
     ports:
       - "8004:8000"
     healthcheck:
@@ -87,8 +89,9 @@ services:
 
   hybrid-service:
     build:
-      context: ./services/hybrid-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/hybrid-service/Dockerfile
+    image: gennet/hybrid-service:latest
     ports:
       - "8005:8000"
     healthcheck:
@@ -99,8 +102,9 @@ services:
 
   ml-service:
     build:
-      context: ./services/ml-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/ml-service/Dockerfile
+    image: gennet/ml-service:latest
     ports:
       - "8006:8000"
     healthcheck:
@@ -111,8 +115,9 @@ services:
 
   collaboration-service:
     build:
-      context: ./services/collaboration-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/collaboration-service/Dockerfile
+    image: gennet/collaboration-service:latest
     ports:
       - "8007:8000"
     environment:
@@ -129,8 +134,9 @@ services:
 
   metadata-service:
     build:
-      context: ./services/metadata-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/metadata-service/Dockerfile
+    image: gennet/metadata-service:latest
     ports:
       - "8008:8000"
     environment:
@@ -146,8 +152,9 @@ services:
 
   graphql-service:
     build:
-      context: ./services/graphql-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/graphql-service/Dockerfile
+    image: gennet/graphql-service:latest
     ports:
       - "8009:8000"
     healthcheck:

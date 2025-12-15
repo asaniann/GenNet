@@ -44,7 +44,7 @@ class Workflow(Base):
     progress = Column(Integer, default=0)  # 0-100
     results = Column(JSON)
     error_message = Column(Text)
-    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    owner_id = Column(Integer, nullable=False)  # User ID from auth service (no FK constraint)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     started_at = Column(DateTime(timezone=True))

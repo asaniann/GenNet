@@ -69,7 +69,7 @@ class NetworkCreateValidator(BaseModel):
         
         return v
     
-    @root_validator
+    @root_validator(skip_on_failure=True)
     def validate_network_structure(cls, values):
         """Validate overall network structure"""
         nodes = values.get('nodes', [])
@@ -107,7 +107,7 @@ class WorkflowCreateValidator(BaseModel):
     """Enhanced validation for workflow creation"""
     name: str = Field(..., min_length=1, max_length=200)
     description: Optional[str] = Field(None, max_length=1000)
-    workflow_type: str = Field(..., regex='^(qualitative|hybrid|ml)$')
+    workflow_type: str = Field(..., pattern='^(qualitative|hybrid|ml)$')
     network_id: str = Field(..., min_length=1)
     parameters: Dict[str, Any] = Field(default_factory=dict)
     

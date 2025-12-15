@@ -15,7 +15,7 @@ class CursorPaginationParams(BaseModel):
     """Cursor-based pagination parameters"""
     limit: int = Field(50, ge=1, le=100, description="Number of items per page")
     cursor: Optional[str] = Field(None, description="Cursor for pagination (base64 encoded)")
-    direction: str = Field("next", regex="^(next|prev)$", description="Pagination direction")
+    direction: str = Field("next", pattern="^(next|prev)$", description="Pagination direction")
     
     def decode_cursor(self) -> Optional[Dict[str, Any]]:
         """Decode cursor to get pagination state"""

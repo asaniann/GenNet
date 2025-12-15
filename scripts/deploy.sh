@@ -322,22 +322,79 @@ install_python_deps() {
     
     log_info "Virtual environment activated: $VIRTUAL_ENV"
     
-    # Upgrade pip
-    log_info "Upgrading pip..."
-    if pip install --upgrade pip 2>&1 | grep -qiE "ERROR|FAILED"; then
-        log_warning "pip upgrade had issues (continuing anyway)"
-    else
-        echo -n "✓ "
-    fi
+    # Upgrade pip (only if outdated)
+    log_info "Checking pip version..."
+    local current_pip=$(pip --version 2>/dev/null | awk '{print $2}' || echo "0.0.0")
+    local latest_pip=$(pip index versions pip 2>/dev/null | grep -oP 'LATEST:\s+\K[^\s]+' || echo "")
     
-    # Install development dependencies
-    if [ -f "requirements-dev.txt" ]; then
-        log_info "Installing development dependencies..."
-        local dev_output=$(pip install -r requirements-dev.txt 2>&1)
-        if [ $? -ne 0 ] || echo "$dev_output" | grep -qiE "ERROR|FAILED|Could not"; then
-            log_warning "Some dev dependencies had issues (continuing - tests may be affected)"
+    # If we can't check latest version, just upgrade (safe operation)
+    if [ -z "$latest_pip" ]; then
+        log_info "Upgrading pip (cannot check version)..."
+        if pip install --upgrade pip 2>&1 | grep -qiE "ERROR|FAILED"; then
+            log_warning "pip upgrade had issues (continuing anyway)"
         else
             echo -n "✓ "
+        fi
+    elif [ "$current_pip" != "$latest_pip" ]; then
+        log_info "Upgrading pip ($current_pip -> $latest_pip)..."
+        if pip install --upgrade pip 2>&1 | grep -qiE "ERROR|FAILED"; then
+            log_warning "pip upgrade had issues (continuing anyway)"
+        else
+            echo -n "✓ "
+        fi
+    else
+        log_info "pip is already up to date ($current_pip)"
+    fi
+    
+    # Install development dependencies (only if requirements changed or missing)
+    if [ -f "requirements-dev.txt" ]; then
+        local req_hash_file="$PROJECT_ROOT/.venv/requirements-dev.hash"
+        local current_hash=$(md5sum requirements-dev.txt 2>/dev/null | awk '{print $1}' || sha256sum requirements-dev.txt 2>/dev/null | awk '{print $1}' || echo "")
+        
+        if [ -n "$current_hash" ] && [ -f "$req_hash_file" ]; then
+            local cached_hash=$(cat "$req_hash_file" 2>/dev/null || echo "")
+            if [ "$current_hash" = "$cached_hash" ]; then
+                # Verify packages are actually installed
+                local missing_count=0
+                while IFS= read -r line || [ -n "$line" ]; do
+                    line=$(echo "$line" | sed 's/#.*$//' | xargs)
+                    [ -z "$line" ] && continue
+                    local pkg_name=$(echo "$line" | cut -d'=' -f1 | cut -d'>' -f1 | cut -d'<' -f1 | cut -d'[' -f1 | xargs)
+                    [ -z "$pkg_name" ] && continue
+                    if ! pip show "$pkg_name" &>/dev/null; then
+                        missing_count=$((missing_count + 1))
+                    fi
+                done < requirements-dev.txt
+                
+                if [ $missing_count -eq 0 ]; then
+                    log_info "Development dependencies unchanged and all installed (skipping)"
+                else
+                    log_info "Installing development dependencies ($missing_count packages missing)..."
+                    local dev_output=$(pip install --upgrade-strategy only-if-needed -r requirements-dev.txt 2>&1)
+                fi
+            else
+                log_info "Installing development dependencies (requirements changed)..."
+                local dev_output=$(pip install --upgrade-strategy only-if-needed -r requirements-dev.txt 2>&1)
+                if [ $? -ne 0 ] || echo "$dev_output" | grep -qiE "ERROR|FAILED|Could not"; then
+                    log_warning "Some dev dependencies had issues (continuing - tests may be affected)"
+                else
+                    echo -n "✓ "
+                    mkdir -p "$PROJECT_ROOT/.venv"
+                    echo "$current_hash" > "$req_hash_file"
+                fi
+            fi
+        else
+            log_info "Installing development dependencies..."
+            local dev_output=$(pip install --upgrade-strategy only-if-needed -r requirements-dev.txt 2>&1)
+            if [ $? -ne 0 ] || echo "$dev_output" | grep -qiE "ERROR|FAILED|Could not"; then
+                log_warning "Some dev dependencies had issues (continuing - tests may be affected)"
+            else
+                echo -n "✓ "
+                if [ -n "$current_hash" ]; then
+                    mkdir -p "$PROJECT_ROOT/.venv"
+                    echo "$current_hash" > "$req_hash_file"
+                fi
+            fi
         fi
     fi
     
@@ -370,37 +427,94 @@ install_python_deps() {
                 fi
             done
             
-            if [ "$is_heavy" = "true" ]; then
-                log_warning "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                log_warning "Installing $service_name dependencies (PyTorch ~2GB download)"
-                log_warning "This may take 10-20 minutes depending on your internet speed"
-                log_warning "You can cancel (Ctrl+C) and restart with SKIP_SERVICE_DEPS=true"
-                log_warning "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                log_info "Downloading and installing (showing progress)..."
-                # Use --progress-bar off and show actual download progress
-                if pip install -r "$req_file" 2>&1 | tee /tmp/pip_install_${service_name}.log; then
-                    log_success "$service_name dependencies installed successfully"
-                else
-                    local install_exit=$?
-                    if grep -qiE "ERROR|FAILED|Could not find a version|No matching distribution" /tmp/pip_install_${service_name}.log; then
-                        log_warning "$service_name installation had errors (non-critical - service runs in Docker)"
-                        failed_services+=("$service_name")
+            # Check if requirements file changed or dependencies are missing
+            local req_hash_file="$PROJECT_ROOT/.venv/${service_name}.hash"
+            local current_hash=$(md5sum "$req_file" 2>/dev/null | awk '{print $1}' || sha256sum "$req_file" 2>/dev/null | awk '{print $1}' || echo "")
+            local should_install=true
+            
+            if [ -n "$current_hash" ] && [ -f "$req_hash_file" ]; then
+                local cached_hash=$(cat "$req_hash_file" 2>/dev/null || echo "")
+                if [ "$current_hash" = "$cached_hash" ]; then
+                    # Check if ALL packages from requirements.txt are actually installed
+                    local missing_packages=0
+                    local total_packages=0
+                    
+                    # Read requirements file and check each package
+                    while IFS= read -r line || [ -n "$line" ]; do
+                        # Skip comments and empty lines
+                        line=$(echo "$line" | sed 's/#.*$//' | xargs)
+                        [ -z "$line" ] && continue
+                        
+                        # Extract package name (handle various formats: package==1.0, package>=1.0, etc.)
+                        local pkg_name=$(echo "$line" | cut -d'=' -f1 | cut -d'>' -f1 | cut -d'<' -f1 | cut -d'[' -f1 | xargs)
+                        [ -z "$pkg_name" ] && continue
+                        
+                        total_packages=$((total_packages + 1))
+                        
+                        # Check if package is installed
+                        if ! pip show "$pkg_name" &>/dev/null; then
+                            missing_packages=$((missing_packages + 1))
+                        fi
+                    done < "$req_file"
+                    
+                    if [ $total_packages -eq 0 ]; then
+                        # Empty requirements file, skip
+                        should_install=false
+                    elif [ $missing_packages -eq 0 ]; then
+                        log_info "Skipping $service_name - all $total_packages dependencies already installed"
+                        should_install=false
                     else
-                        log_warning "$service_name installation failed (exit code: $install_exit, non-critical)"
-                        failed_services+=("$service_name")
+                        log_info "$service_name: $missing_packages of $total_packages packages missing, will install"
                     fi
                 fi
-            else
-                log_info "Installing from $req_file ($service_name)..."
-                # Install and capture output
-                if pip install -r "$req_file" >/tmp/pip_install_${service_name}.log 2>&1; then
-                    echo "✓ "
-                else
-                    if grep -qiE "ERROR|FAILED|Could not find a version|No matching distribution" /tmp/pip_install_${service_name}.log; then
-                        log_warning "Some dependencies failed for $service_name (non-critical - service runs in Docker)"
-                        failed_services+=("$service_name")
+            fi
+            
+            if [ "$should_install" = "true" ]; then
+                if [ "$is_heavy" = "true" ]; then
+                    log_warning "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    log_warning "Installing $service_name dependencies (PyTorch ~2GB download)"
+                    log_warning "This may take 10-20 minutes depending on your internet speed"
+                    log_warning "You can cancel (Ctrl+C) and restart with SKIP_SERVICE_DEPS=true"
+                    log_warning "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    log_info "Downloading and installing (showing progress)..."
+                    # Use --upgrade-strategy only-if-needed to avoid re-downloading existing packages
+                    # Use --no-deps only for specific cases, otherwise let pip handle dependencies
+                    if pip install --upgrade-strategy only-if-needed -r "$req_file" 2>&1 | tee /tmp/pip_install_${service_name}.log; then
+                        log_success "$service_name dependencies installed successfully"
+                        if [ -n "$current_hash" ]; then
+                            mkdir -p "$PROJECT_ROOT/.venv"
+                            echo "$current_hash" > "$req_hash_file"
+                        fi
                     else
-                        echo "✓ "  # Probably succeeded with warnings
+                        local install_exit=$?
+                        if grep -qiE "ERROR|FAILED|Could not find a version|No matching distribution" /tmp/pip_install_${service_name}.log; then
+                            log_warning "$service_name installation had errors (non-critical - service runs in Docker)"
+                            failed_services+=("$service_name")
+                        else
+                            log_warning "$service_name installation failed (exit code: $install_exit, non-critical)"
+                            failed_services+=("$service_name")
+                        fi
+                    fi
+                else
+                    log_info "Installing from $req_file ($service_name)..."
+                    # Install with --upgrade-strategy only-if-needed to avoid unnecessary downloads
+                    if pip install --upgrade-strategy only-if-needed -r "$req_file" >/tmp/pip_install_${service_name}.log 2>&1; then
+                        echo "✓ "
+                        if [ -n "$current_hash" ]; then
+                            mkdir -p "$PROJECT_ROOT/.venv"
+                            echo "$current_hash" > "$req_hash_file"
+                        fi
+                    else
+                        if grep -qiE "ERROR|FAILED|Could not find a version|No matching distribution" /tmp/pip_install_${service_name}.log; then
+                            log_warning "Some dependencies failed for $service_name (non-critical - service runs in Docker)"
+                            failed_services+=("$service_name")
+                        else
+                            echo "✓ "  # Probably succeeded with warnings
+                            if [ -n "$current_hash" ]; then
+                                mkdir -p "$PROJECT_ROOT/.venv"
+                                echo "$current_hash" > "$req_hash_file"
+                            fi
+                        fi
                     fi
                 fi
             fi
@@ -414,18 +528,24 @@ install_python_deps() {
         log_success "Service dependencies processed (services will use Docker containers anyway)"
     fi
     
-    # Install Python SDK (optional, skip if it fails)
+    # Install Python SDK (optional, skip if it fails or already installed)
     if [ -d "libraries/python-sdk" ] && [ -f "libraries/python-sdk/setup.py" ]; then
-        log_info "Installing Python SDK (optional)..."
-        # Try simple installation first
-        cd libraries/python-sdk
-        if pip install -e . 2>&1 | tee /tmp/sdk_install.log | grep -qi "error\|failed\|exception\|traceback"; then
-            log_warning "Python SDK installation had issues (SDK is optional for deployment)"
-            log_warning "You can skip SDK installation - it's only needed for Python API clients"
+        # Check if SDK is already installed
+        local sdk_name=$(grep -E "^name\s*=" libraries/python-sdk/setup.py 2>/dev/null | sed "s/.*name\s*=\s*['\"]\(.*\)['\"].*/\1/" || echo "gennet-sdk")
+        if pip show "$sdk_name" &>/dev/null; then
+            log_info "Python SDK already installed (skipping)"
         else
-            log_success "Python SDK installed successfully"
+            log_info "Installing Python SDK (optional)..."
+            # Try simple installation first
+            cd libraries/python-sdk
+            if pip install -e . 2>&1 | tee /tmp/sdk_install.log | grep -qi "error\|failed\|exception\|traceback"; then
+                log_warning "Python SDK installation had issues (SDK is optional for deployment)"
+                log_warning "You can skip SDK installation - it's only needed for Python API clients"
+            else
+                log_success "Python SDK installed successfully"
+            fi
+            cd "$PROJECT_ROOT"
         fi
-        cd "$PROJECT_ROOT"
     fi
     
     log_success "Python dependencies installed"
@@ -443,20 +563,53 @@ install_node_deps() {
     if [ -d "frontend/web" ]; then
         cd "$PROJECT_ROOT/frontend/web"
         
-        if [ ! -d "node_modules" ]; then
-            log_info "Installing frontend dependencies (this may take a while)..."
-            npm install || error_exit "Failed to install frontend dependencies"
-        else
-            log_info "Frontend dependencies already installed"
+        # Check if node_modules exists and package.json hasn't changed
+        local should_install=true
+        if [ -d "node_modules" ] && [ -f "package.json" ]; then
+            local pkg_hash_file="$PROJECT_ROOT/.venv/frontend-package.hash"
+            local current_hash=$(md5sum package.json package-lock.json 2>/dev/null | md5sum | awk '{print $1}' || \
+                                sha256sum package.json package-lock.json 2>/dev/null | sha256sum | awk '{print $1}' || echo "")
+            
+            if [ -n "$current_hash" ] && [ -f "$pkg_hash_file" ]; then
+                local cached_hash=$(cat "$pkg_hash_file" 2>/dev/null || echo "")
+                if [ "$current_hash" = "$cached_hash" ]; then
+                    log_info "Frontend dependencies unchanged (skipping npm install)"
+                    should_install=false
+                else
+                    log_info "package.json changed - reinstalling dependencies..."
+                fi
+            fi
         fi
         
-        log_success "Frontend dependencies installed"
+        if [ "$should_install" = "true" ]; then
+            if [ ! -d "node_modules" ]; then
+                log_info "Installing frontend dependencies (this may take a while)..."
+            else
+                log_info "Reinstalling frontend dependencies (package.json changed)..."
+            fi
+            
+            npm install || error_exit "Failed to install frontend dependencies"
+            
+            # Save hash if installation succeeded
+            if [ -f "package.json" ]; then
+                local pkg_hash_file="$PROJECT_ROOT/.venv/frontend-package.hash"
+                local current_hash=$(md5sum package.json package-lock.json 2>/dev/null | md5sum | awk '{print $1}' || \
+                                    sha256sum package.json package-lock.json 2>/dev/null | sha256sum | awk '{print $1}' || echo "")
+                if [ -n "$current_hash" ]; then
+                    mkdir -p "$PROJECT_ROOT/.venv"
+                    echo "$current_hash" > "$pkg_hash_file"
+                    log_success "Frontend dependencies installed and cached"
+                fi
+            fi
+        fi
+        
+        log_success "Frontend dependencies ready"
     fi
 }
 
-# Build Docker images
+# Build Docker images (only if missing or changed)
 build_docker_images() {
-    log_info "Building Docker images..."
+    log_info "Building Docker images (only if missing or changed)..."
     
     cd "$PROJECT_ROOT"
     
@@ -477,37 +630,68 @@ build_docker_images() {
     for service in "${services[@]}"; do
         local service_dir="services/$service"
         if [ -d "$service_dir" ] && [ -f "$service_dir/Dockerfile" ]; then
+            # Check if image already exists (unless FORCE_BUILD is set)
+            local image_name="gennet/${service}:latest"
+            if [ "${FORCE_BUILD:-false}" != "true" ] && docker images -q "$image_name" 2>/dev/null | grep -q .; then
+                log_info "Skipping $service - image already exists (use FORCE_BUILD=true to rebuild)"
+                continue
+            fi
+            
             log_info "Building $service..."
             # API gateway is optional - services can run without it
             if [ "$service" = "api-gateway" ]; then
                 log_info "Building API gateway (optional - services work without it)..."
-                if docker build -t "gennet/$service:latest" "$service_dir" 2>&1 | grep -i "error\|failed"; then
-                    log_warning "API gateway build failed (non-critical - services run directly)"
-                    log_info "Services will be accessible directly on their ports without gateway"
+                # API gateway might have different build context, check if it has shared dependency
+                if [ -f "$service_dir/Dockerfile" ] && grep -q "shared" "$service_dir/Dockerfile" 2>/dev/null; then
+                    # Use project root as build context
+                    if docker build -t "$image_name" -f "$service_dir/Dockerfile" . 2>&1 | grep -i "error\|failed"; then
+                        log_warning "API gateway build failed (non-critical - services run directly)"
+                        log_info "Services will be accessible directly on their ports without gateway"
+                    else
+                        log_success "API gateway built successfully"
+                    fi
                 else
-                    log_success "API gateway built successfully"
+                    # Use service directory as build context (old way)
+                    if docker build -t "$image_name" "$service_dir" 2>&1 | grep -i "error\|failed"; then
+                        log_warning "API gateway build failed (non-critical - services run directly)"
+                        log_info "Services will be accessible directly on their ports without gateway"
+                    else
+                        log_success "API gateway built successfully"
+                    fi
                 fi
             else
-                if ! docker build -t "gennet/$service:latest" "$service_dir" 2>&1 | grep -qi "error\|failed"; then
-                    log_success "$service built successfully"
-                else
+                # All services now use project root as build context (to access shared directory)
+                if docker build -t "$image_name" -f "$service_dir/Dockerfile" . 2>&1 | grep -qi "error\|failed"; then
                     log_warning "Failed to build $service"
+                else
+                    log_success "$service built successfully"
                 fi
             fi
         fi
     done
     
-    # Build frontend
+    # Build frontend (only if missing or FORCE_BUILD is set)
     if [ -d "frontend/web" ] && [ -f "frontend/web/Dockerfile" ]; then
-        log_info "Building frontend..."
-        docker build -t "gennet/web:latest" "frontend/web" || log_warning "Failed to build frontend"
+        local web_image="gennet/web:latest"
+        if [ "${FORCE_BUILD:-false}" != "true" ] && docker images -q "$web_image" 2>/dev/null | grep -q .; then
+            log_info "Skipping frontend - image already exists (use FORCE_BUILD=true to rebuild)"
+        else
+            log_info "Building frontend..."
+            docker build -t "$web_image" "frontend/web" || log_warning "Failed to build frontend"
+        fi
     fi
     
-    log_success "Docker images built"
+    log_success "Docker images built (skipped existing images)"
 }
 
 # Fix port conflicts for Docker Compose services
 fix_port_conflicts() {
+    # Only check ports if we're actually deploying (not just checking)
+    if [ "${SKIP_PORT_CHECK:-false}" = "true" ]; then
+        log_info "Skipping port conflict check (SKIP_PORT_CHECK=true)"
+        return 0
+    fi
+    
     log_info "Checking for port conflicts..."
     
     # Define ports to check: service_name:port:alt_port
@@ -520,14 +704,26 @@ fix_port_conflicts() {
     )
     
     local conflicts_found=false
+    local ports_in_use=()
     
     for service in "${!ports_to_check[@]}"; do
         IFS=':' read -r port alt_port <<< "${ports_to_check[$service]}"
         
         # Check if port is in use
         if lsof -i :${port} >/dev/null 2>&1 || ss -tulpn 2>/dev/null | grep -q ":${port}"; then
+            # Check if it's our own Docker Compose service (allow it)
+            local our_container=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -E "gennet-.*-1$" | head -1 || echo "")
+            if [ -n "$our_container" ]; then
+                local container_ports=$(docker port "$our_container" 2>/dev/null | grep ":${port}" || echo "")
+                if [ -n "$container_ports" ]; then
+                    log_info "Port $port is used by our service ($our_container) - OK"
+                    continue
+                fi
+            fi
+            
             log_warning "Port $port ($service) is already in use"
             conflicts_found=true
+            ports_in_use+=("$port")
             
             # Check if it's a Docker container
             local containers_using_port=$(docker ps --format '{{.Names}} {{.Ports}}' 2>/dev/null | grep ":${port}->" | awk '{print $1}' || echo "")
@@ -576,6 +772,8 @@ fix_port_conflicts() {
     
     if [ "$conflicts_found" = false ]; then
         log_success "No port conflicts detected"
+    else
+        log_info "Resolved conflicts for ports: ${ports_in_use[*]}"
     fi
 }
 
@@ -598,11 +796,23 @@ deploy_local() {
     docker-compose -f docker-compose.yml -f docker-compose.services.yml down 2>/dev/null || \
     docker compose -f docker-compose.yml -f docker-compose.services.yml down 2>/dev/null || true
     
+    # Check if we should force rebuild (only if FORCE_BUILD=true)
+    local build_flag=""
+    if [ "${FORCE_BUILD:-false}" = "true" ]; then
+        log_info "FORCE_BUILD=true - will rebuild all images"
+        build_flag="--build"
+    else
+        log_info "Using existing images (Docker Compose will only build if images are missing)"
+        log_info "Set FORCE_BUILD=true to force rebuild all services"
+    fi
+    
     # Start services (both infrastructure and application services)
+    # Docker Compose will automatically build missing images, but won't rebuild existing ones
+    # unless --build flag is used or Dockerfile/context changed
     log_info "Starting services with Docker Compose..."
     log_info "Using docker-compose.yml (infrastructure) + docker-compose.services.yml (services)..."
-    docker-compose -f docker-compose.yml -f docker-compose.services.yml up -d || \
-    docker compose -f docker-compose.yml -f docker-compose.services.yml up -d || \
+    docker-compose -f docker-compose.yml -f docker-compose.services.yml up -d $build_flag || \
+    docker compose -f docker-compose.yml -f docker-compose.services.yml up -d $build_flag || \
     error_exit "Failed to start Docker Compose services"
     
     # Wait for services to be ready
@@ -821,11 +1031,13 @@ main() {
     
     install_node_deps
     
-    # Build Docker images
+    # Build Docker images (only if not skipping)
+    # Note: build_docker_images() will skip existing images unless FORCE_BUILD=true
     if [ "${SKIP_BUILD:-false}" != "true" ]; then
         build_docker_images
     else
         log_info "Skipping Docker image build (SKIP_BUILD=true)"
+        log_info "Docker Compose will build missing images automatically when starting services"
     fi
     
     # Deploy based on mode
@@ -863,7 +1075,10 @@ Arguments:
 Environment Variables:
   RUN_TESTS          Set to 'true' to run tests after deployment
   SKIP_BUILD         Set to 'true' to skip Docker image building
+  FORCE_BUILD        Set to 'true' to force rebuild all images (default: only build if missing)
   SKIP_VENV          Set to 'true' to skip Python venv creation (Docker-only)
+  SKIP_PORT_CHECK    Set to 'true' to skip port conflict checking
+  SKIP_SERVICE_DEPS   Set to 'true' to skip installing service dependencies locally
   DOCKER_REGISTRY    Docker registry URL for production deployments
 
 Examples:
