@@ -1,0 +1,33 @@
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+sqlalchemy==2.0.23
+psycopg2-binary==2.9.9
+pydantic==2.5.0
+pydantic-settings==2.1.0
+python-multipart==0.0.6
+python-jose[cryptography]==3.3.0
+alembic==1.12.1
+boto3==1.29.7
+redis==5.0.1
+
+# Genomics libraries
+cyvcf2==0.30.4
+pysam==0.21.0
+pandas>=2.0.0
+numpy>=1.24.0
+scipy>=1.11.0
+
+# Variant annotation (using API-based tools)
+requests==2.31.0
+httpx==0.25.0
+
+# PRS calculation
+scikit-learn>=1.3.0
+statsmodels>=0.14.0
+
+# Network analysis (integrate with existing)
+networkx>=3.0
+
+# Integration with existing services
+neo4j==5.15.0
+
