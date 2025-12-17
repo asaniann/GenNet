@@ -182,11 +182,22 @@ check_prerequisites() {
             log_warning "AWS CLI not found. Some AWS operations may fail."
         fi
     else
-        # Local checks
-        if ! check_command docker-compose; then
-            if ! docker compose version &> /dev/null; then
-                missing_deps+=("docker-compose")
+        # Local checks - verify docker compose is available
+        # Check if docker-compose exists and is not just a symlink to docker
+        local has_real_compose=false
+        if command -v docker-compose >/dev/null 2>&1; then
+            local compose_path=$(command -v docker-compose)
+            # If it's not a symlink to docker, it's the real docker-compose
+            if [ ! -L "$compose_path" ] || [ "$(readlink -f "$compose_path")" != "$(readlink -f "$(command -v docker)" 2>/dev/null)" 2>/dev/null ]; then
+                if docker-compose version &> /dev/null; then
+                    has_real_compose=true
+                fi
             fi
+        fi
+        
+        # Check docker compose plugin
+        if [ "$has_real_compose" = "false" ] && ! docker compose version &> /dev/null; then
+            missing_deps+=("docker-compose")
         fi
     fi
     
@@ -880,6 +891,45 @@ fix_port_conflicts() {
     fi
 }
 
+# Check Docker resources before deployment
+check_docker_resources() {
+    log_info "Checking Docker resources..."
+    
+    # Check available disk space
+    local available_space=$(df -BG "$PROJECT_ROOT" | tail -1 | awk '{print $4}' | sed 's/G//')
+    if [ "$available_space" -lt 10 ]; then
+        log_warning "Low disk space: ${available_space}GB available (recommended: 20GB+)"
+        log_info "Consider cleaning Docker: docker system prune -a"
+    else
+        log_info "Disk space: ${available_space}GB available"
+    fi
+    
+    # Check Docker build cache size
+    local cache_size=$(docker system df --format "{{.Type}}\t{{.Size}}" 2>/dev/null | grep "Build Cache" | awk '{print $2}' || echo "unknown")
+    if [ "$cache_size" != "unknown" ]; then
+        log_info "Docker build cache: $cache_size"
+        if echo "$cache_size" | grep -qE "GB|TB" && [ "$(echo "$cache_size" | sed 's/[^0-9.]//g' | cut -d. -f1)" -gt 20 ]; then
+            log_warning "Large build cache detected. Consider cleaning: docker builder prune"
+        fi
+    fi
+    
+    # Check if Docker daemon is responsive
+    if ! docker info >/dev/null 2>&1; then
+        error_exit "Docker daemon is not responding. Please restart Docker."
+    fi
+    
+    # Check available memory (if possible)
+    if command -v free >/dev/null 2>&1; then
+        local available_mem=$(free -g | awk '/^Mem:/{print $7}')
+        if [ "$available_mem" -lt 4 ]; then
+            log_warning "Low available memory: ${available_mem}GB (recommended: 8GB+)"
+            log_info "Docker builds may fail with 'signal: killed' if memory is exhausted"
+        else
+            log_info "Available memory: ${available_mem}GB"
+        fi
+    fi
+}
+
 # Local deployment
 deploy_local() {
     log_info "Starting local deployment..."
@@ -891,13 +941,45 @@ deploy_local() {
         error_exit "docker-compose.yml not found"
     fi
     
+    # Check Docker resources before starting
+    check_docker_resources
+    
     # Fix port conflicts automatically
     fix_port_conflicts
     
+    # Determine which compose command to use (needed for stopping containers)
+    # Check if docker-compose is a real binary or just a symlink to docker
+    local use_docker_compose=false
+    if command -v docker-compose >/dev/null 2>&1; then
+        local compose_path=$(command -v docker-compose)
+        # Check if it's a symlink to docker (not the real docker-compose)
+        if [ -L "$compose_path" ] && [ "$(readlink -f "$compose_path")" = "$(readlink -f "$(command -v docker)")" ]; then
+            # It's a symlink to docker, use 'docker compose' instead
+            use_docker_compose=false
+            log_info "docker-compose is a symlink to docker, using 'docker compose' instead"
+        elif docker-compose version >/dev/null 2>&1; then
+            # Real docker-compose exists and works
+            use_docker_compose=true
+        elif docker compose version >/dev/null 2>&1; then
+            # Fall back to docker compose
+            use_docker_compose=false
+        fi
+    elif docker compose version >/dev/null 2>&1; then
+        use_docker_compose=false
+    fi
+    
+    # Helper function to run compose commands
+    run_compose() {
+        if [ "$use_docker_compose" = "true" ]; then
+            docker-compose "$@"
+        else
+            docker compose "$@"
+        fi
+    }
+    
     # Stop existing containers
     log_info "Stopping existing containers..."
-    docker-compose -f docker-compose.yml -f docker-compose.services.yml down 2>/dev/null || \
-    docker compose -f docker-compose.yml -f docker-compose.services.yml down 2>/dev/null || true
+    run_compose -f docker-compose.yml -f docker-compose.services.yml down 2>/dev/null || true
     
     # Check if we should force rebuild (only if FORCE_BUILD=true)
     local build_flag=""
@@ -914,9 +996,64 @@ deploy_local() {
     # unless --build flag is used or Dockerfile/context changed
     log_info "Starting services with Docker Compose..."
     log_info "Using docker-compose.yml (infrastructure) + docker-compose.services.yml (services)..."
-    docker-compose -f docker-compose.yml -f docker-compose.services.yml up -d $build_flag || \
-    docker compose -f docker-compose.yml -f docker-compose.services.yml up -d $build_flag || \
-    error_exit "Failed to start Docker Compose services"
+    
+    # Log which compose command we're using
+    if [ "$use_docker_compose" = "true" ]; then
+        log_info "Using docker-compose command"
+    else
+        log_info "Using 'docker compose' command"
+    fi
+    
+    # Start infrastructure services first (lighter, less likely to fail)
+    log_info "Starting infrastructure services first (postgres, redis, neo4j, influxdb)..."
+    if ! run_compose -f docker-compose.yml up -d 2>&1 | tee /tmp/docker_infra_start.log; then
+        log_warning "Infrastructure services startup had issues, but continuing..."
+    else
+        log_success "Infrastructure services started"
+        sleep 5  # Give infrastructure time to initialize
+    fi
+    
+    # Start application services
+    log_info "Starting application services..."
+    # Run compose command (timeout doesn't work well with functions, so we'll handle it differently)
+    if ! run_compose -f docker-compose.yml -f docker-compose.services.yml up -d $build_flag 2>&1 | tee /tmp/docker_compose_start.log; then
+        # Check for specific error types
+        if grep -qiE "signal: killed|killed|OOM|out of memory" /tmp/docker_compose_start.log; then
+            log_error "════════════════════════════════════════════════════════════════"
+            log_error "Docker process was killed (likely out of memory or resource limits)"
+            log_error "════════════════════════════════════════════════════════════════"
+            log_error ""
+            log_error "Possible solutions:"
+            log_error "  1. Free up memory: Close other applications"
+            log_error "  2. Increase Docker memory limit in Docker Desktop settings"
+            log_error "  3. Clean Docker: docker system prune -a"
+            log_error "  4. Start services incrementally (infrastructure is already running)"
+            log_error "  5. Check system logs: dmesg | tail -20 (for OOM killer messages)"
+            log_error ""
+            log_info "Attempting to start services without build (using existing images)..."
+            if ! run_compose -f docker-compose.yml -f docker-compose.services.yml up -d 2>&1; then
+                log_error ""
+                log_error "Failed to start even without build. Try:"
+                log_error "  - Start services one at a time"
+                log_error "  - Use: docker compose -f docker-compose.yml up -d (infrastructure only)"
+                error_exit "Docker deployment failed due to resource constraints"
+            else
+                log_warning "Started services without build (some may be missing images)"
+            fi
+        elif grep -qiE "failed to execute bake" /tmp/docker_compose_start.log; then
+            log_error "Docker buildx/bake failed"
+            log_info "Attempting to start without build..."
+            if ! run_compose -f docker-compose.yml -f docker-compose.services.yml up -d 2>&1; then
+                error_exit "Failed to start services even without build"
+            else
+                log_warning "Started services without build (some may be missing)"
+            fi
+        else
+            log_error "Failed to start Docker Compose services"
+            log_error "Check /tmp/docker_compose_start.log for details"
+            error_exit "Docker Compose startup failed"
+        fi
+    fi
     
     # Wait for services to be ready
     log_info "Waiting for services to be ready..."
@@ -928,8 +1065,7 @@ deploy_local() {
     local attempt=0
     
     while [ $attempt -lt $max_attempts ]; do
-        if docker-compose -f docker-compose.yml -f docker-compose.services.yml ps 2>/dev/null | grep -q "Up" || \
-           docker compose -f docker-compose.yml -f docker-compose.services.yml ps 2>/dev/null | grep -q "Up"; then
+        if run_compose -f docker-compose.yml -f docker-compose.services.yml ps 2>/dev/null | grep -q "Up"; then
             log_success "Services are running"
             break
         fi
@@ -938,13 +1074,12 @@ deploy_local() {
     done
     
     if [ $attempt -eq $max_attempts ]; then
-        log_warning "Services may not be fully ready. Check with 'docker-compose -f docker-compose.yml -f docker-compose.services.yml ps'"
+        log_warning "Services may not be fully ready. Check with: run_compose -f docker-compose.yml -f docker-compose.services.yml ps"
     fi
     
     # Display service status
     log_info "Service status:"
-    docker-compose -f docker-compose.yml -f docker-compose.services.yml ps 2>/dev/null || \
-    docker compose -f docker-compose.yml -f docker-compose.services.yml ps 2>/dev/null || true
+    run_compose -f docker-compose.yml -f docker-compose.services.yml ps 2>/dev/null || true
     
     log_success "Local deployment complete!"
     log_info "Services should be available at:"
