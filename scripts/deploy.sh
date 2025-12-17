@@ -322,6 +322,41 @@ install_python_deps() {
     
     log_info "Virtual environment activated: $VIRTUAL_ENV"
     
+    # Configure pip for better timeout and retry handling
+    export PIP_DEFAULT_TIMEOUT=300  # 5 minutes
+    export PIP_TIMEOUT=300
+    export PIP_RETRIES=3
+    
+    # Helper function to retry pip installs on timeout
+    pip_install_with_retry() {
+        local max_retries=3
+        local retry_count=0
+        
+        while [ $retry_count -lt $max_retries ]; do
+            if [ $retry_count -gt 0 ]; then
+                log_info "Retrying pip install (attempt $((retry_count + 1))/$max_retries)..."
+                sleep $((retry_count * 5))  # Exponential backoff: 0s, 5s, 10s
+            fi
+            
+            if pip "$@" --timeout=300 --retries=3 2>&1 | tee /tmp/pip_install_attempt.log; then
+                return 0
+            fi
+            
+            # Check if it's a timeout error
+            if grep -qiE "Read timed out|TimeoutError|Connection.*timeout" /tmp/pip_install_attempt.log; then
+                retry_count=$((retry_count + 1))
+                log_warning "Network timeout detected (attempt $retry_count/$max_retries)"
+                continue
+            else
+                # Not a timeout, return the error
+                return 1
+            fi
+        done
+        
+        log_error "Failed after $max_retries retries due to network timeouts"
+        return 1
+    }
+    
     # Upgrade pip (only if outdated)
     log_info "Checking pip version..."
     local current_pip=$(pip --version 2>/dev/null | awk '{print $2}' || echo "0.0.0")
@@ -330,20 +365,35 @@ install_python_deps() {
     # If we can't check latest version, just upgrade (safe operation)
     if [ -z "$latest_pip" ]; then
         log_info "Upgrading pip (cannot check version)..."
-        if pip install --upgrade pip 2>&1 | grep -qiE "ERROR|FAILED"; then
+        if pip install --upgrade pip --timeout=300 2>&1 | grep -qiE "ERROR|FAILED"; then
             log_warning "pip upgrade had issues (continuing anyway)"
         else
             echo -n "✓ "
         fi
     elif [ "$current_pip" != "$latest_pip" ]; then
         log_info "Upgrading pip ($current_pip -> $latest_pip)..."
-        if pip install --upgrade pip 2>&1 | grep -qiE "ERROR|FAILED"; then
+        if pip install --upgrade pip --timeout=300 2>&1 | grep -qiE "ERROR|FAILED"; then
             log_warning "pip upgrade had issues (continuing anyway)"
         else
             echo -n "✓ "
         fi
     else
         log_info "pip is already up to date ($current_pip)"
+    fi
+    
+    # Check Python version for compatibility fixes
+    local python_version=$(python3 --version 2>&1 | awk '{print $2}' | cut -d. -f1,2)
+    local is_python313=false
+    if [ "$python_version" = "3.13" ]; then
+        is_python313=true
+        log_info "Python 3.13 detected - applying compatibility fixes for pydantic..."
+        # Install compatible pydantic versions first to avoid build errors
+        log_info "Installing Python 3.13-compatible pydantic versions..."
+        if pip install --upgrade --no-cache-dir --timeout=300 --retries=3 "pydantic>=2.10.0" "pydantic-core>=2.20.0" 2>&1 | grep -qiE "ERROR|FAILED"; then
+            log_warning "Failed to install compatible pydantic versions (continuing anyway)"
+        else
+            log_success "Compatible pydantic versions installed"
+        fi
     fi
     
     # Install development dependencies (only if requirements changed or missing)
@@ -370,30 +420,32 @@ install_python_deps() {
                     log_info "Development dependencies unchanged and all installed (skipping)"
                 else
                     log_info "Installing development dependencies ($missing_count packages missing)..."
-                    local dev_output=$(pip install --upgrade-strategy only-if-needed -r requirements-dev.txt 2>&1)
+                    if pip_install_with_retry install --upgrade-strategy only-if-needed -r requirements-dev.txt; then
+                        echo -n "✓ "
+                    else
+                        log_warning "Some dev dependencies had issues (continuing - tests may be affected)"
+                    fi
                 fi
             else
                 log_info "Installing development dependencies (requirements changed)..."
-                local dev_output=$(pip install --upgrade-strategy only-if-needed -r requirements-dev.txt 2>&1)
-                if [ $? -ne 0 ] || echo "$dev_output" | grep -qiE "ERROR|FAILED|Could not"; then
-                    log_warning "Some dev dependencies had issues (continuing - tests may be affected)"
-                else
+                if pip_install_with_retry pip install --upgrade-strategy only-if-needed -r requirements-dev.txt; then
                     echo -n "✓ "
                     mkdir -p "$PROJECT_ROOT/.venv"
                     echo "$current_hash" > "$req_hash_file"
+                else
+                    log_warning "Some dev dependencies had issues (continuing - tests may be affected)"
                 fi
             fi
         else
             log_info "Installing development dependencies..."
-            local dev_output=$(pip install --upgrade-strategy only-if-needed -r requirements-dev.txt 2>&1)
-            if [ $? -ne 0 ] || echo "$dev_output" | grep -qiE "ERROR|FAILED|Could not"; then
-                log_warning "Some dev dependencies had issues (continuing - tests may be affected)"
-            else
+            if pip_install_with_retry pip install --upgrade-strategy only-if-needed -r requirements-dev.txt; then
                 echo -n "✓ "
                 if [ -n "$current_hash" ]; then
                     mkdir -p "$PROJECT_ROOT/.venv"
                     echo "$current_hash" > "$req_hash_file"
                 fi
+            else
+                log_warning "Some dev dependencies had issues (continuing - tests may be affected)"
             fi
         fi
     fi
@@ -409,6 +461,16 @@ install_python_deps() {
         log_info "Skipping service dependencies (SKIP_SERVICE_DEPS=true)"
         log_info "Services will use Docker containers which have dependencies pre-installed"
         return 0
+    fi
+    
+    # Check Python version again for service installation (in case it wasn't set earlier)
+    if [ -z "${is_python313:-}" ]; then
+        local python_version_check=$(python3 --version 2>&1 | awk '{print $2}' | cut -d. -f1,2)
+        if [ "$python_version_check" = "3.13" ]; then
+            is_python313=true
+        else
+            is_python313=false
+        fi
     fi
     
     local failed_services=()
@@ -470,6 +532,19 @@ install_python_deps() {
             fi
             
             if [ "$should_install" = "true" ]; then
+                # For Python 3.13, filter out old pydantic versions to avoid build errors
+                local install_cmd="pip install --upgrade-strategy only-if-needed -r"
+                if [ "$is_python313" = "true" ] && grep -q "^pydantic" "$req_file"; then
+                    log_info "Python 3.13: Filtering out old pydantic versions from $service_name..."
+                    # Create temporary requirements file without pydantic
+                    local temp_req="/tmp/${service_name}_req_no_pydantic.txt"
+                    grep -v "^pydantic" "$req_file" | grep -v "^#" | grep -v "^$" > "$temp_req" || true
+                    if [ -s "$temp_req" ]; then
+                        install_cmd="pip install --upgrade-strategy only-if-needed -r"
+                        req_file="$temp_req"
+                    fi
+                fi
+                
                 if [ "$is_heavy" = "true" ]; then
                     log_warning "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
                     log_warning "Installing $service_name dependencies (PyTorch ~2GB download)"
@@ -479,7 +554,7 @@ install_python_deps() {
                     log_info "Downloading and installing (showing progress)..."
                     # Use --upgrade-strategy only-if-needed to avoid re-downloading existing packages
                     # Use --no-deps only for specific cases, otherwise let pip handle dependencies
-                    if pip install --upgrade-strategy only-if-needed -r "$req_file" 2>&1 | tee /tmp/pip_install_${service_name}.log; then
+                    if pip_install_with_retry install --upgrade-strategy only-if-needed -r "$req_file" 2>&1 | tee /tmp/pip_install_${service_name}.log; then
                         log_success "$service_name dependencies installed successfully"
                         if [ -n "$current_hash" ]; then
                             mkdir -p "$PROJECT_ROOT/.venv"
@@ -487,7 +562,21 @@ install_python_deps() {
                         fi
                     else
                         local install_exit=$?
-                        if grep -qiE "ERROR|FAILED|Could not find a version|No matching distribution" /tmp/pip_install_${service_name}.log; then
+                        # Check for pydantic-core build errors specifically
+                        if grep -qiE "pydantic-core.*ForwardRef.*recursive_guard" /tmp/pip_install_${service_name}.log; then
+                            log_warning "pydantic-core build error detected (Python 3.13 compatibility issue)"
+                            log_info "Attempting to install compatible pydantic version..."
+                            if pip install --upgrade --no-cache-dir --timeout=300 --retries=3 "pydantic>=2.10.0" "pydantic-core>=2.20.0" 2>&1 | grep -qiE "ERROR|FAILED"; then
+                                log_warning "$service_name: pydantic installation failed (non-critical - service runs in Docker)"
+                            else
+                                log_success "$service_name: Installed compatible pydantic version"
+                                # Retry installing other dependencies
+                                if [ -f "$temp_req" ] && [ -s "$temp_req" ]; then
+                                    pip install --upgrade-strategy only-if-needed -r "$temp_req" >/tmp/pip_install_${service_name}_retry.log 2>&1 || true
+                                fi
+                            fi
+                            failed_services+=("$service_name")
+                        elif grep -qiE "ERROR|FAILED|Could not find a version|No matching distribution" /tmp/pip_install_${service_name}.log; then
                             log_warning "$service_name installation had errors (non-critical - service runs in Docker)"
                             failed_services+=("$service_name")
                         else
@@ -495,17 +584,29 @@ install_python_deps() {
                             failed_services+=("$service_name")
                         fi
                     fi
+                    # Clean up temp file
+                    [ -f "$temp_req" ] && rm -f "$temp_req" || true
                 else
                     log_info "Installing from $req_file ($service_name)..."
                     # Install with --upgrade-strategy only-if-needed to avoid unnecessary downloads
-                    if pip install --upgrade-strategy only-if-needed -r "$req_file" >/tmp/pip_install_${service_name}.log 2>&1; then
+                    if pip_install_with_retry install --upgrade-strategy only-if-needed -r "$req_file" >/tmp/pip_install_${service_name}.log 2>&1; then
                         echo "✓ "
                         if [ -n "$current_hash" ]; then
                             mkdir -p "$PROJECT_ROOT/.venv"
                             echo "$current_hash" > "$req_hash_file"
                         fi
                     else
-                        if grep -qiE "ERROR|FAILED|Could not find a version|No matching distribution" /tmp/pip_install_${service_name}.log; then
+                        # Check for pydantic-core build errors
+                        if grep -qiE "pydantic-core.*ForwardRef.*recursive_guard" /tmp/pip_install_${service_name}.log; then
+                            log_warning "pydantic-core build error detected (Python 3.13 compatibility)"
+                            log_info "Installing compatible pydantic version for $service_name..."
+                            pip install --upgrade --no-cache-dir --timeout=300 --retries=3 "pydantic>=2.10.0" "pydantic-core>=2.20.0" >/dev/null 2>&1 || true
+                            # Retry with filtered requirements
+                            if [ -f "$temp_req" ] && [ -s "$temp_req" ]; then
+                                pip install --upgrade-strategy only-if-needed -r "$temp_req" >/tmp/pip_install_${service_name}_retry.log 2>&1 || true
+                            fi
+                            failed_services+=("$service_name")
+                        elif grep -qiE "ERROR|FAILED|Could not find a version|No matching distribution" /tmp/pip_install_${service_name}.log; then
                             log_warning "Some dependencies failed for $service_name (non-critical - service runs in Docker)"
                             failed_services+=("$service_name")
                         else
@@ -516,6 +617,8 @@ install_python_deps() {
                             fi
                         fi
                     fi
+                    # Clean up temp file
+                    [ -f "$temp_req" ] && rm -f "$temp_req" || true
                 fi
             fi
         fi
@@ -1047,8 +1150,29 @@ main() {
         deploy_local
     fi
     
+    # Pre-deployment validation
+    if [ "$DEPLOYMENT_MODE" = "production" ]; then
+        log_info "Running pre-deployment checks..."
+        if [ -f "scripts/pre-deployment-check.sh" ]; then
+            ./scripts/pre-deployment-check.sh "$ENVIRONMENT" || {
+                log_error "Pre-deployment checks failed"
+                error_exit "Please fix issues before deploying"
+            }
+        fi
+    fi
+    
     # Validate deployment
     validate_deployment
+    
+    # Post-deployment validation
+    if [ "$DEPLOYMENT_MODE" = "production" ]; then
+        log_info "Running post-deployment smoke tests..."
+        if [ -f "scripts/run_smoke_tests.sh" ]; then
+            ./scripts/run_smoke_tests.sh "$ENVIRONMENT" || {
+                log_warning "Some smoke tests failed. Review and fix if needed."
+            }
+        fi
+    fi
     
     # Run tests if requested
     run_tests

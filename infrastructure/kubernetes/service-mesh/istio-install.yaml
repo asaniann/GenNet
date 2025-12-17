@@ -1,0 +1,76 @@
+# Istio Service Mesh Installation
+# This file provides the base Istio configuration
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: istio-system
+  labels:
+    istio-injection: enabled
+---
+# Istio Operator for installation
+# Note: Actual Istio installation should be done via istioctl or operator
+# This file documents the configuration
+
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
+metadata:
+  name: gennet-istio
+  namespace: istio-system
+spec:
+  profile: production
+  components:
+    pilot:
+      k8s:
+        resources:
+          requests:
+            cpu: 500m
+            memory: 2048Mi
+    ingressGateways:
+    - name: istio-ingressgateway
+      enabled: true
+      k8s:
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+    egressGateways:
+    - name: istio-egressgateway
+      enabled: true
+  values:
+    global:
+      # Enable mTLS by default
+      mtls:
+        enabled: true
+      # Multi-cluster configuration
+      multiCluster:
+        clusterName: gennet-primary
+      # Mesh ID for multi-cluster
+      meshID: gennet-mesh
+    pilot:
+      # Enable telemetry
+      telemetry:
+        enabled: true
+      # Tracing configuration
+      tracing:
+        enabled: true
+        provider: jaeger
+    # Mesh-wide policies
+    meshConfig:
+      # Access logging
+      accessLogFile: /dev/stdout
+      # Default proxy configuration
+      defaultConfig:
+        proxyStatsMatcher:
+          inclusionRegexps:
+          - ".*circuit_breakers.*"
+          - ".*outlier_detection.*"
+          - ".*upstream_rq_retry.*"
+          - ".*upstream_rq_timeout.*"
+      # Outbound traffic policy
+      outboundTrafficPolicy:
+        mode: REGISTRY_ONLY
+      # Enable protocol sniffing
+      enableProtocolSniffingForOutbound: true
+      enableProtocolSniffingForInbound: true
+

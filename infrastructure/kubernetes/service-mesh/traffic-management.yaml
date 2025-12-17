@@ -1,0 +1,131 @@
+# Traffic Management Configuration
+# VirtualServices and DestinationRules for traffic routing
+
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: gennet-api
+  namespace: gennet-system
+spec:
+  hosts:
+  - api-gateway
+  - "*.gennet.example.com"
+  http:
+  - match:
+    - uri:
+        prefix: "/api/v1/auth"
+    route:
+    - destination:
+        host: auth-service
+        port:
+          number: 8000
+      weight: 100
+  - match:
+    - uri:
+        prefix: "/api/v1/networks"
+    route:
+    - destination:
+        host: grn-service
+        port:
+          number: 8000
+      weight: 100
+  - match:
+    - uri:
+        prefix: "/api/v1/workflows"
+    route:
+    - destination:
+        host: workflow-service
+        port:
+          number: 8000
+      weight: 100
+  - match:
+    - uri:
+        prefix: "/api/v1/health"
+    route:
+    - destination:
+        host: health-service
+        port:
+          number: 8000
+      weight: 100
+---
+# Destination Rules with load balancing and circuit breakers
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: auth-service
+  namespace: gennet-system
+spec:
+  host: auth-service
+  trafficPolicy:
+    loadBalancer:
+      simple: LEAST_CONN
+    connectionPool:
+      tcp:
+        maxConnections: 100
+      http:
+        http1MaxPendingRequests: 10
+        http2MaxRequests: 100
+        maxRequestsPerConnection: 2
+        maxRetries: 3
+    circuitBreaker:
+      consecutiveErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+      minHealthPercent: 50
+    outlierDetection:
+      consecutiveErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+---
+# Canary deployment configuration
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: grn-service-canary
+  namespace: gennet-system
+spec:
+  hosts:
+  - grn-service
+  http:
+  - match:
+    - headers:
+        canary:
+          exact: "true"
+    route:
+    - destination:
+        host: grn-service
+        subset: canary
+        port:
+          number: 8000
+      weight: 100
+  - route:
+    - destination:
+        host: grn-service
+        subset: stable
+        port:
+          number: 8000
+      weight: 90
+    - destination:
+        host: grn-service
+        subset: canary
+        port:
+          number: 8000
+      weight: 10
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: grn-service
+  namespace: gennet-system
+spec:
+  host: grn-service
+  subsets:
+  - name: stable
+    labels:
+      version: stable
+  - name: canary
+    labels:
+      version: canary
+

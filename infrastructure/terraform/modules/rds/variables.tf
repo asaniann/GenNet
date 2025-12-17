@@ -1,32 +1,23 @@
 variable "name" {
-  description = "RDS instance name"
+  description = "Name of the RDS instance"
   type        = string
 }
 
-variable "vpc_id" {
-  description = "VPC ID"
+variable "environment" {
+  description = "Environment name"
   type        = string
-}
-
-variable "subnet_ids" {
-  description = "Subnet IDs"
-  type        = list(string)
-}
-
-variable "vpc_cidr" {
-  description = "VPC CIDR block"
-  type        = string
-  default     = "10.0.0.0/16"
 }
 
 variable "instance_class" {
   description = "RDS instance class"
   type        = string
+  default     = "db.t3.medium"
 }
 
 variable "engine_version" {
   description = "PostgreSQL engine version"
   type        = string
+  default     = "15.4"
 }
 
 variable "db_name" {
@@ -46,15 +37,29 @@ variable "db_password" {
   sensitive   = true
 }
 
-variable "environment" {
-  description = "Environment"
+variable "subnet_ids" {
+  description = "Subnet IDs for RDS"
+  type        = list(string)
+}
+
+variable "vpc_id" {
+  description = "VPC ID"
   type        = string
-  default     = "dev"
+}
+
+variable "vpc_cidr" {
+  description = "VPC CIDR block"
+  type        = string
+}
+
+variable "kms_key_id" {
+  description = "KMS key ID for encryption"
+  type        = string
+  default     = ""
 }
 
 variable "tags" {
-  description = "Tags"
+  description = "Tags for resources"
   type        = map(string)
   default     = {}
 }
-

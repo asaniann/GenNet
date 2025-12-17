@@ -1,0 +1,79 @@
+[MASTER]
+# Python code to execute, usually for sys.path manipulation
+init-hook='import sys; sys.path.append(".")'
+
+# Files or directories to be skipped
+ignore=CVS,migrations,venv,__pycache__
+
+# Pickle collected data for later comparisons
+persistent=yes
+
+# List of plugins
+load-plugins=
+
+[MESSAGES CONTROL]
+# Disable specific messages
+disable=
+    missing-docstring,
+    too-few-public-methods,
+    too-many-arguments,
+    too-many-instance-attributes,
+    too-many-locals,
+    too-many-branches,
+    too-many-statements,
+    import-error,
+    no-member
+
+[FORMAT]
+# Maximum number of characters on a single line
+max-line-length=120
+
+# Regexp for a line that is allowed to be longer than the limit
+ignore-long-lines=^\s*(# )?<?https?://\S+>?$
+
+[BASIC]
+# Good variable names
+good-names=i,j,k,ex,Run,_,id,db
+
+# Bad variable names
+bad-names=foo,bar,baz,toto,tutu,tata
+
+[DESIGN]
+# Maximum number of arguments
+max-args=7
+
+# Maximum number of attributes
+max-attributes=10
+
+# Maximum number of boolean expressions
+max-bool-expr=5
+
+# Maximum number of branch for function / method body
+max-branches=12
+
+# Maximum number of locals
+max-locals=15
+
+# Maximum number of parents
+max-parents=7
+
+# Maximum number of public methods
+max-public-methods=20
+
+# Maximum number of return / yield
+max-returns=6
+
+# Maximum number of statements
+max-statements=50
+
+[IMPORTS]
+# Allow wildcard imports
+allow-wildcard-with-all=no
+
+# Analyse import fallback blocks
+analyse-fallback-blocks=no
+
+[EXCEPTIONS]
+# Exceptions that will emit a warning when being caught
+overgeneral-exceptions=Exception
+

@@ -10,8 +10,13 @@ alembic==1.12.1
 boto3==1.29.7
 redis==5.0.1
 
+# Build dependencies (must be installed before cyvcf2)
+cython>=3.0.0
+numpy>=1.24.0
+
 # Genomics libraries
-cyvcf2==0.30.4
+# Note: cyvcf2 may need to be built from source with proper setup
+cyvcf2>=0.30.0
 pysam==0.21.0
 pandas>=2.0.0
 numpy>=1.24.0

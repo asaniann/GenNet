@@ -1,0 +1,135 @@
+# Jaeger Deployment for Distributed Tracing
+# Deploys Jaeger for trace collection and visualization
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jaeger-config
+  namespace: gennet-system
+data:
+  collector.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+    
+    processors:
+      batch:
+    
+    exporters:
+      logging:
+        loglevel: info
+      jaeger:
+        endpoint: jaeger-collector:14250
+        tls:
+          insecure: true
+    
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [jaeger, logging]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jaeger-collector
+  namespace: gennet-system
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: jaeger-collector
+  template:
+    metadata:
+      labels:
+        app: jaeger-collector
+    spec:
+      containers:
+      - name: jaeger-collector
+        image: jaegertracing/jaeger-collector:latest
+        ports:
+        - containerPort: 14250
+          name: grpc
+        - containerPort: 14268
+          name: http
+        env:
+        - name: SPAN_STORAGE_TYPE
+          value: "elasticsearch"
+        - name: ES_SERVER_URLS
+          value: "http://elasticsearch:9200"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jaeger-query
+  namespace: gennet-system
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: jaeger-query
+  template:
+    metadata:
+      labels:
+        app: jaeger-query
+    spec:
+      containers:
+      - name: jaeger-query
+        image: jaegertracing/jaeger-query:latest
+        ports:
+        - containerPort: 16686
+          name: http-query
+        env:
+        - name: SPAN_STORAGE_TYPE
+          value: "elasticsearch"
+        - name: ES_SERVER_URLS
+          value: "http://elasticsearch:9200"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jaeger-collector
+  namespace: gennet-system
+spec:
+  selector:
+    app: jaeger-collector
+  ports:
+  - name: grpc
+    port: 4317
+    targetPort: 14250
+  - name: http
+    port: 4318
+    targetPort: 14268
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jaeger-query
+  namespace: gennet-system
+spec:
+  selector:
+    app: jaeger-query
+  ports:
+  - port: 16686
+    targetPort: 16686
+  type: LoadBalancer
+

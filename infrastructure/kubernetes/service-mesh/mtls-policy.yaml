@@ -1,0 +1,22 @@
+# mTLS Policy for Service Mesh
+# Enforces mutual TLS between all services
+
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: gennet-system
+spec:
+  mtls:
+    mode: STRICT
+---
+# Apply to all namespaces
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: istio-system
+spec:
+  mtls:
+    mode: STRICT
+

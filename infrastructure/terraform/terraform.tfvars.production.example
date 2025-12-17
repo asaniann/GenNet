@@ -1,0 +1,84 @@
+# Production Terraform Variables
+# Copy this file to terraform.tfvars and fill in your values
+# DO NOT commit terraform.tfvars to version control
+
+# Project Configuration
+project_name = "gennet"
+environment = "production"
+
+# AWS Configuration
+aws_region = "us-east-1"
+aws_profile = "default"  # Optional: AWS profile name
+
+# Multi-Region Configuration
+regions = ["us-east-1", "eu-west-1", "ap-southeast-1"]
+primary_region = "us-east-1"
+
+# VPC Configuration
+vpc_cidr = "10.0.0.0/16"
+availability_zones = ["us-east-1a", "us-east-1b", "us-east-1c"]
+
+private_subnets = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
+public_subnets = ["10.0.101.0/24", "10.0.102.0/24", "10.0.103.0/24"]
+
+# EKS Configuration
+eks_cluster_name = "gennet-production"
+eks_node_instance_type = "m5.large"
+eks_node_min_size = 2
+eks_node_max_size = 10
+eks_node_desired_size = 3
+
+# RDS Configuration
+rds_instance_class = "db.r5.xlarge"
+rds_allocated_storage = 500
+rds_backup_retention_period = 30
+rds_multi_az = true
+rds_engine_version = "15.4"
+
+# Database Credentials (use AWS Secrets Manager in production)
+# These should be stored in AWS Secrets Manager, not in this file
+db_username = "gennet_admin"  # Will be overridden by Secrets Manager
+db_password = "CHANGE_ME"     # Will be overridden by Secrets Manager
+
+# Neo4j Configuration
+neptune_instance_class = "db.r5.2xlarge"
+neptune_backup_retention_period = 30
+
+# Redis Configuration
+redis_node_type = "cache.r6g.large"
+redis_num_cache_nodes = 2
+
+# S3 Configuration
+s3_bucket_name = "gennet-production-data"
+s3_enable_versioning = true
+s3_enable_lifecycle = true
+
+# DNS Configuration
+domain_name = "gennet.example.com"
+subdomain = "api"
+
+# SSL/TLS Configuration
+certificate_arn = ""  # ACM certificate ARN (create via ACM or cert-manager)
+
+# Monitoring Configuration
+enable_cloudwatch = true
+enable_prometheus = true
+enable_grafana = true
+
+# Backup Configuration
+backup_retention_days = 30
+backup_schedule = "cron(0 2 * * ? *)"  # Daily at 2 AM UTC
+
+# Security Configuration
+enable_waf = true
+enable_encryption = true
+kms_key_alias = "gennet-production-key"
+
+# Tags
+tags = {
+  Environment = "production"
+  Project     = "GenNet"
+  ManagedBy   = "Terraform"
+  Team        = "Platform"
+}
+

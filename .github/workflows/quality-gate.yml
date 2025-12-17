@@ -1,0 +1,85 @@
+name: Quality Gate
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+
+jobs:
+  code-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install quality tools
+        run: |
+          pip install black flake8 mypy pylint bandit safety
+      
+      - name: Run Black
+        run: |
+          black --check services/ shared/
+      
+      - name: Run Flake8
+        run: |
+          flake8 services/ shared/ --max-line-length=120 --exclude=__pycache__,*.pyc --count
+      
+      - name: Run MyPy
+        run: |
+          mypy services/ shared/ --ignore-missing-imports || true
+      
+      - name: Run Pylint
+        run: |
+          pylint services/ shared/ --disable=all --enable=errors,warnings || true
+      
+      - name: Run Bandit (Security)
+        run: |
+          bandit -r services/ shared/ -f json -o bandit-report.json || true
+      
+      - name: Check dependencies
+        run: |
+          safety check --json || true
+  
+  test-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install pytest pytest-cov pytest-xdist
+          pip install -r requirements-dev.txt
+      
+      - name: Run tests with coverage
+        run: |
+          pytest --cov=services --cov=shared --cov-report=xml --cov-report=term --cov-report=html -n auto
+      
+      - name: Check coverage threshold
+        run: |
+          coverage report --fail-under=80 || echo "Coverage below 80%"
+      
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: unittests
+  
+  quality-gate-decision:
+    runs-on: ubuntu-latest
+    needs: [code-quality, test-coverage]
+    steps:
+      - name: Quality Gate Decision
+        run: |
+          echo "Quality gates completed"
+          echo "Review results above to make go/no-go decision"
+

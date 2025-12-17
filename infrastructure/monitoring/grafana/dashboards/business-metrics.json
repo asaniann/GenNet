@@ -1,0 +1,61 @@
+{
+  "dashboard": {
+    "title": "GenNet Business Metrics",
+    "tags": ["gennet", "business", "metrics"],
+    "timezone": "browser",
+    "schemaVersion": 27,
+    "version": 1,
+    "refresh": "1m",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Networks Created",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(increase(business_networks_created_total[1h]))",
+            "legendFormat": "Networks"
+          }
+        ],
+        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "Workflows Executed",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(increase(business_workflows_executed_total[1h]))",
+            "legendFormat": "Workflows"
+          }
+        ],
+        "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "Active Users",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(business_active_users)",
+            "legendFormat": "Users"
+          }
+        ],
+        "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0}
+      },
+      {
+        "id": 4,
+        "title": "Health Reports Generated",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum(rate(business_health_reports_generated_total[5m]))",
+            "legendFormat": "Reports/min"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4}
+      }
+    ]
+  }
+}
+

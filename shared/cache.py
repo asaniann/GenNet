@@ -1,243 +1,218 @@
 """
-Redis caching utilities for GenNet services
+Multi-layer Caching Strategy
+Provides Redis-based caching with TTL and invalidation
 """
+
+import logging
 import json
 import hashlib
-import functools
-from typing import Any, Optional, Callable
+import asyncio
+from typing import Any, Optional, Callable, Dict
+from functools import wraps
 import redis
-import os
-import logging
+from redis.exceptions import RedisError
 
 logger = logging.getLogger(__name__)
 
-# Redis client singleton
-_redis_client: Optional[redis.Redis] = None
+
+class CacheConfig:
+    """Cache configuration"""
+    
+    def __init__(
+        self,
+        ttl: int = 3600,  # 1 hour default
+        key_prefix: str = "gennet",
+        redis_url: Optional[str] = None,
+        enable_cache: bool = True
+    ):
+        self.ttl = ttl
+        self.key_prefix = key_prefix
+        self.redis_url = redis_url or "redis://localhost:6379/0"
+        self.enable_cache = enable_cache
 
 
-def get_redis_client() -> Optional[redis.Redis]:
-    """Get or create Redis client"""
-    global _redis_client
+class CacheManager:
+    """Cache manager for Redis-based caching"""
     
-    if _redis_client is not None:
-        return _redis_client
-    
-    try:
-        redis_host = os.getenv('REDIS_HOST', 'redis')
-        redis_port = int(os.getenv('REDIS_PORT', 6379))
-        redis_db = int(os.getenv('REDIS_CACHE_DB', '2'))  # Use DB 2 for caching
+    def __init__(self, config: Optional[CacheConfig] = None):
+        self.config = config or CacheConfig()
+        self.redis_client = None
         
-        _redis_client = redis.Redis(
-            host=redis_host,
-            port=redis_port,
-            db=redis_db,
-            decode_responses=True,
-            socket_connect_timeout=2,
-            socket_timeout=2
-        )
-        # Test connection
-        _redis_client.ping()
-        logger.info("Redis cache client connected successfully")
-        return _redis_client
-    except (redis.ConnectionError, redis.TimeoutError, Exception) as e:
-        logger.warning(f"Redis cache not available: {e}. Caching disabled.")
-        _redis_client = None
-        return None
-
-
-def cache_key(*args, **kwargs) -> str:
-    """Generate a cache key from function arguments"""
-    key_parts = []
+        if self.config.enable_cache:
+            try:
+                self.redis_client = redis.from_url(
+                    self.config.redis_url,
+                    decode_responses=True,
+                    socket_connect_timeout=5,
+                    socket_timeout=5
+                )
+                # Test connection
+                self.redis_client.ping()
+                logger.info("Redis cache connected")
+            except (RedisError, ConnectionError) as e:
+                logger.warning(f"Redis cache not available: {e}")
+                self.redis_client = None
     
-    # Add positional arguments
-    for arg in args:
-        if isinstance(arg, (str, int, float, bool)):
-            key_parts.append(str(arg))
-        elif isinstance(arg, dict):
-            key_parts.append(json.dumps(arg, sort_keys=True))
-        else:
-            key_parts.append(str(arg))
+    def get(self, key: str) -> Optional[Any]:
+        """Get value from cache"""
+        if not self.redis_client or not self.config.enable_cache:
+            return None
+        
+        try:
+            full_key = f"{self.config.key_prefix}:{key}"
+            value = self.redis_client.get(full_key)
+            
+            if value:
+                return json.loads(value)
+            return None
+        except (RedisError, json.JSONDecodeError) as e:
+            logger.warning(f"Cache get error for key {key}: {e}")
+            return None
     
-    # Add keyword arguments (sorted for consistency)
-    for key, value in sorted(kwargs.items()):
-        if key in ('db', 'request', 'response', 'background_tasks'):  # Skip non-serializable args
-            continue
-        if isinstance(value, (str, int, float, bool)):
-            key_parts.append(f"{key}={value}")
-        elif isinstance(value, dict):
-            key_parts.append(f"{key}={json.dumps(value, sort_keys=True)}")
-        else:
-            key_parts.append(f"{key}={str(value)}")
+    def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
+        """Set value in cache"""
+        if not self.redis_client or not self.config.enable_cache:
+            return False
+        
+        try:
+            full_key = f"{self.config.key_prefix}:{key}"
+            ttl = ttl or self.config.ttl
+            serialized = json.dumps(value)
+            
+            self.redis_client.setex(full_key, ttl, serialized)
+            return True
+        except (RedisError, TypeError) as e:
+            logger.warning(f"Cache set error for key {key}: {e}")
+            return False
     
-    # Create hash
-    key_string = '|'.join(key_parts)
-    key_hash = hashlib.md5(key_string.encode()).hexdigest()
-    return key_hash
+    def delete(self, key: str) -> bool:
+        """Delete key from cache"""
+        if not self.redis_client or not self.config.enable_cache:
+            return False
+        
+        try:
+            full_key = f"{self.config.key_prefix}:{key}"
+            self.redis_client.delete(full_key)
+            return True
+        except RedisError as e:
+            logger.warning(f"Cache delete error for key {key}: {e}")
+            return False
+    
+    def invalidate_pattern(self, pattern: str) -> int:
+        """Invalidate all keys matching pattern"""
+        if not self.redis_client or not self.config.enable_cache:
+            return 0
+        
+        try:
+            full_pattern = f"{self.config.key_prefix}:{pattern}"
+            keys = self.redis_client.keys(full_pattern)
+            
+            if keys:
+                return self.redis_client.delete(*keys)
+            return 0
+        except RedisError as e:
+            logger.warning(f"Cache invalidate error for pattern {pattern}: {e}")
+            return 0
+    
+    def clear(self) -> bool:
+        """Clear all cache"""
+        if not self.redis_client or not self.config.enable_cache:
+            return False
+        
+        try:
+            pattern = f"{self.config.key_prefix}:*"
+            keys = self.redis_client.keys(pattern)
+            
+            if keys:
+                self.redis_client.delete(*keys)
+            return True
+        except RedisError as e:
+            logger.warning(f"Cache clear error: {e}")
+            return False
 
 
-def cached(ttl: int = 300, key_prefix: str = "cache"):
+# Global cache manager
+_cache_manager: Optional[CacheManager] = None
+
+
+def get_cache_manager() -> CacheManager:
+    """Get global cache manager instance"""
+    global _cache_manager
+    if _cache_manager is None:
+        _cache_manager = CacheManager()
+    return _cache_manager
+
+
+def cached(
+    ttl: int = 3600,
+    key_func: Optional[Callable] = None,
+    cache_manager: Optional[CacheManager] = None
+):
     """
-    Decorator to cache function results in Redis
-    
-    Args:
-        ttl: Time to live in seconds (default: 5 minutes)
-        key_prefix: Prefix for cache keys
+    Caching decorator
     
     Usage:
-        @cached(ttl=600)
-        async def get_network(network_id: str):
+        @cached(ttl=1800, key_func=lambda network_id: f"network:{network_id}")
+        def get_network(network_id: str):
             # Expensive operation
-            return network_data
+            pass
     """
-    def decorator(func: Callable) -> Callable:
-        @functools.wraps(func)
-        async def async_wrapper(*args, **kwargs):
+    if cache_manager is None:
+        cache_manager = get_cache_manager()
+    
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
             # Generate cache key
-            func_name = func.__name__
-            key_hash = cache_key(*args, **kwargs)
-            cache_key_str = f"{key_prefix}:{func_name}:{key_hash}"
-            
-            redis_client = get_redis_client()
-            
-            # Try to get from cache
-            if redis_client:
-                try:
-                    cached_value = redis_client.get(cache_key_str)
-                    if cached_value:
-                        logger.debug(f"Cache hit: {cache_key_str}")
-                        return json.loads(cached_value)
-                except Exception as e:
-                    logger.warning(f"Cache read error: {e}")
-            
-            # Call function
-            result = await func(*args, **kwargs)
-            
-            # Store in cache
-            if redis_client:
-                try:
-                    # Serialize result
-                    serialized = json.dumps(result, default=str)
-                    redis_client.setex(cache_key_str, ttl, serialized)
-                    logger.debug(f"Cache set: {cache_key_str} (TTL: {ttl}s)")
-                except Exception as e:
-                    logger.warning(f"Cache write error: {e}")
-            
-            return result
-        
-        @functools.wraps(func)
-        def sync_wrapper(*args, **kwargs):
-            # For sync functions
-            func_name = func.__name__
-            key_hash = cache_key(*args, **kwargs)
-            cache_key_str = f"{key_prefix}:{func_name}:{key_hash}"
-            
-            redis_client = get_redis_client()
+            if key_func:
+                cache_key = key_func(*args, **kwargs)
+            else:
+                # Default: hash function name and arguments
+                key_data = f"{func.__module__}.{func.__name__}:{args}:{kwargs}"
+                cache_key = hashlib.md5(key_data.encode()).hexdigest()
             
             # Try to get from cache
-            if redis_client:
-                try:
-                    cached_value = redis_client.get(cache_key_str)
-                    if cached_value:
-                        logger.debug(f"Cache hit: {cache_key_str}")
-                        return json.loads(cached_value)
-                except Exception as e:
-                    logger.warning(f"Cache read error: {e}")
+            cached_value = cache_manager.get(cache_key)
+            if cached_value is not None:
+                logger.debug(f"Cache hit for {cache_key}")
+                return cached_value
             
-            # Call function
+            # Cache miss - execute function
+            logger.debug(f"Cache miss for {cache_key}")
             result = func(*args, **kwargs)
             
             # Store in cache
-            if redis_client:
-                try:
-                    serialized = json.dumps(result, default=str)
-                    redis_client.setex(cache_key_str, ttl, serialized)
-                    logger.debug(f"Cache set: {cache_key_str} (TTL: {ttl}s)")
-                except Exception as e:
-                    logger.warning(f"Cache write error: {e}")
+            cache_manager.set(cache_key, result, ttl)
             
             return result
         
-        # Return appropriate wrapper based on function type
-        import inspect
-        if inspect.iscoroutinefunction(func):
+        @wraps(func)
+        async def async_wrapper(*args, **kwargs):
+            # Generate cache key
+            if key_func:
+                cache_key = key_func(*args, **kwargs)
+            else:
+                key_data = f"{func.__module__}.{func.__name__}:{args}:{kwargs}"
+                cache_key = hashlib.md5(key_data.encode()).hexdigest()
+            
+            # Try to get from cache
+            cached_value = cache_manager.get(cache_key)
+            if cached_value is not None:
+                logger.debug(f"Cache hit for {cache_key}")
+                return cached_value
+            
+            # Cache miss - execute function
+            logger.debug(f"Cache miss for {cache_key}")
+            result = await func(*args, **kwargs)
+            
+            # Store in cache
+            cache_manager.set(cache_key, result, ttl)
+            
+            return result
+        
+        if asyncio.iscoroutinefunction(func):
             return async_wrapper
         else:
-            return sync_wrapper
+            return wrapper
     
     return decorator
-
-
-def invalidate_cache(pattern: str):
-    """
-    Invalidate cache entries matching a pattern
-    
-    Args:
-        pattern: Cache key pattern (supports wildcards like 'cache:get_network:*')
-    
-    Usage:
-        invalidate_cache("cache:get_network:*")
-    """
-    redis_client = get_redis_client()
-    if not redis_client:
-        return
-    
-    try:
-        # Find matching keys
-        keys = redis_client.keys(pattern)
-        if keys:
-            redis_client.delete(*keys)
-            logger.info(f"Invalidated {len(keys)} cache entries matching pattern: {pattern}")
-    except Exception as e:
-        logger.warning(f"Cache invalidation error: {e}")
-
-
-def clear_cache(key_prefix: str = "cache"):
-    """
-    Clear all cache entries with a given prefix
-    
-    Usage:
-        clear_cache("cache:get_network")
-    """
-    invalidate_cache(f"{key_prefix}*")
-
-
-def cache_get(key: str) -> Optional[Any]:
-    """Get a value from cache by key"""
-    redis_client = get_redis_client()
-    if not redis_client:
-        return None
-    
-    try:
-        value = redis_client.get(key)
-        if value:
-            return json.loads(value)
-    except Exception as e:
-        logger.warning(f"Cache get error: {e}")
-    
-    return None
-
-
-def cache_set(key: str, value: Any, ttl: int = 300):
-    """Set a value in cache with TTL"""
-    redis_client = get_redis_client()
-    if not redis_client:
-        return
-    
-    try:
-        serialized = json.dumps(value, default=str)
-        redis_client.setex(key, ttl, serialized)
-    except Exception as e:
-        logger.warning(f"Cache set error: {e}")
-
-
-def cache_delete(key: str):
-    """Delete a value from cache"""
-    redis_client = get_redis_client()
-    if not redis_client:
-        return
-    
-    try:
-        redis_client.delete(key)
-    except Exception as e:
-        logger.warning(f"Cache delete error: {e}")
-

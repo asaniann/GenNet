@@ -9,7 +9,10 @@ COPY shared /app/shared
 
 # Copy requirements
 COPY services/collaboration-service/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --timeout=300 --retries=3 -r requirements.txt || \
+    (echo "Retrying pip install after timeout..." && \
+     sleep 5 && \
+     pip install --no-cache-dir --timeout=300 --retries=3 -r requirements.txt)
 
 # Copy application code
 COPY services/collaboration-service /app

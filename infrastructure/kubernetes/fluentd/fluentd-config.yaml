@@ -1,0 +1,66 @@
+# Fluentd Configuration for Log Aggregation
+# Collects logs from all services and forwards to CloudWatch/ELK
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fluentd-config
+  namespace: gennet-system
+data:
+  fluent.conf: |
+    <source>
+      @type tail
+      path /var/log/containers/*.log
+      pos_file /var/log/fluentd-containers.log.pos
+      tag kubernetes.*
+      read_from_head true
+      <parse>
+        @type json
+        time_key time
+        time_format %Y-%m-%dT%H:%M:%S.%NZ
+        keep_time_key true
+      </parse>
+    </source>
+    
+    <filter kubernetes.**>
+      @type kubernetes_metadata
+    </filter>
+    
+    <filter kubernetes.**>
+      @type record_transformer
+      <record>
+        cluster_name gennet-cluster
+        environment ${ENVIRONMENT}
+      </record>
+    </filter>
+    
+    <match kubernetes.**>
+      @type cloudwatch_logs
+      log_group_name gennet-logs
+      log_stream_name ${tag}
+      auto_create_stream true
+      region us-east-1
+      <buffer>
+        @type file
+        path /var/log/fluentd-buffers/cloudwatch.buffer
+        flush_interval 5s
+        chunk_limit_size 2M
+        queue_limit_length 8
+        retry_max_interval 30
+      </buffer>
+    </match>
+    
+    # Also forward to ELK if configured
+    <match kubernetes.**>
+      @type forward
+      <server>
+        host elasticsearch
+        port 9200
+      </server>
+      <buffer>
+        @type file
+        path /var/log/fluentd-buffers/elasticsearch.buffer
+        flush_interval 5s
+      </buffer>
+    </match>
+

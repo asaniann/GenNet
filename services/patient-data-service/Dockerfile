@@ -8,12 +8,18 @@ RUN apt-get update && apt-get install -y \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
+# Copy shared directory first (needed by all services)
+COPY shared /app/shared
+
 # Copy requirements and install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY services/patient-data-service/requirements.txt .
+RUN pip install --no-cache-dir --timeout=300 --retries=3 -r requirements.txt || \
+    (echo "Retrying pip install after timeout..." && \
+     sleep 5 && \
+     pip install --no-cache-dir --timeout=300 --retries=3 -r requirements.txt)
 
 # Copy application code
-COPY . .
+COPY services/patient-data-service /app
 
 # Expose port
 EXPOSE 8000

@@ -1,0 +1,79 @@
+# ArgoCD Application Definitions
+# GitOps configuration for automated deployments
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gennet-auth-service
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/your-org/gennet.git
+    targetRevision: main
+    path: infrastructure/kubernetes/auth-service-deployment.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: gennet-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gennet-grn-service
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/your-org/gennet.git
+    targetRevision: main
+    path: infrastructure/kubernetes/grn-service-deployment.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: gennet-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: gennet-services
+  namespace: argocd
+spec:
+  generators:
+  - list:
+      elements:
+      - service: workflow-service
+        path: infrastructure/kubernetes/workflow-service-deployment.yaml
+      - service: health-service
+        path: infrastructure/kubernetes/health-service-deployment.yaml
+      - service: qualitative-service
+        path: infrastructure/kubernetes/qualitative-service-deployment.yaml
+      - service: hybrid-service
+        path: infrastructure/kubernetes/hybrid-service-deployment.yaml
+      - service: ml-service
+        path: infrastructure/kubernetes/ml-service-deployment.yaml
+  template:
+    metadata:
+      name: '{{service}}'
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/your-org/gennet.git
+        targetRevision: main
+        path: '{{path}}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: gennet-system
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+

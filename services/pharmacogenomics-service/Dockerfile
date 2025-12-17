@@ -7,10 +7,18 @@ RUN apt-get update && apt-get install -y \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy shared directory first (needed by all services)
+COPY shared /app/shared
 
-COPY . .
+# Copy requirements
+COPY services/pharmacogenomics-service/requirements.txt .
+RUN pip install --no-cache-dir --timeout=300 --retries=3 -r requirements.txt || \
+    (echo "Retrying pip install after timeout..." && \
+     sleep 5 && \
+     pip install --no-cache-dir --timeout=300 --retries=3 -r requirements.txt)
+
+# Copy application code
+COPY services/pharmacogenomics-service /app
 
 EXPOSE 8000
 

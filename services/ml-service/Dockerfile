@@ -12,7 +12,11 @@ COPY shared /app/shared
 
 # Copy requirements
 COPY services/ml-service/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Add timeout and retry for large downloads (PyTorch ~2GB)
+RUN pip install --no-cache-dir --timeout=600 --retries=3 -r requirements.txt || \
+    (echo "Retrying pip install after timeout..." && \
+     sleep 10 && \
+     pip install --no-cache-dir --timeout=600 --retries=3 -r requirements.txt)
 
 # Copy application code
 COPY services/ml-service /app

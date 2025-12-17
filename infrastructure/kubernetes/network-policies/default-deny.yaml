@@ -1,0 +1,35 @@
+# Default Deny Network Policy
+# Implements zero-trust networking model
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: gennet-system
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+---
+# Allow DNS
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: gennet-system
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+

@@ -31,6 +31,8 @@ from shared.compression import setup_compression
 # Import existing inference implementation
 from inference import GRNInference
 from parameter_predictor import ParameterPredictor, predict_parameters
+from anomaly_detector import AnomalyDetector
+from disease_predictor import DiseasePredictor
 
 app = FastAPI(
     title="GenNet ML Service",
@@ -52,6 +54,8 @@ logger = get_logger(__name__)
 
 # Initialize inference engine
 grn_inference = GRNInference()
+anomaly_detector = AnomalyDetector()
+disease_predictor = DiseasePredictor()
 
 
 class InferenceRequest(BaseModel):
@@ -142,24 +146,106 @@ async def infer_grn(request: InferenceRequest):
 
 
 @app.post("/prediction/parameters")
-async def predict_parameters(network_id: str, expression_data: Dict[str, Any]):
-    """Predict K-parameters using ML models"""
-    # Placeholder - implement GNN-based parameter prediction
-    return {"parameters": {}}
+async def predict_parameters_endpoint(
+    network_id: str,
+    expression_data: Dict[str, Any],
+    network_structure: Optional[Dict[str, Any]] = None
+):
+    """
+    Predict K-parameters using ML models (GNN-based)
+    
+    - **network_id**: Network identifier
+    - **expression_data**: Expression data for nodes
+    - **network_structure**: Optional network structure
+    """
+    logger.info(f"Predicting parameters for network: {network_id}")
+    
+    try:
+        # Use network structure if provided, otherwise construct from expression_data
+        if not network_structure:
+            # Construct basic network structure from expression data
+            network_structure = {
+                "nodes": [
+                    {"id": k, "label": k} for k in expression_data.keys()
+                ] if isinstance(expression_data, dict) else []
+            }
+        
+        result = predict_parameters(
+            network_graph=network_structure,
+            expression_data=expression_data
+        )
+        
+        result["network_id"] = network_id
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error predicting parameters: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Parameter prediction failed: {str(e)}"
+        )
 
 
 @app.post("/analysis/anomaly-detection")
-async def detect_anomalies(network_id: str, expression_data: Dict[str, Any]):
-    """Detect anomalies in network behavior"""
-    # Placeholder - implement anomaly detection
-    return {"anomalies": []}
+async def detect_anomalies(
+    network_id: str,
+    expression_data: Dict[str, Any],
+    baseline_data: Optional[Dict[str, Any]] = None
+):
+    """
+    Detect anomalies in network behavior
+    
+    - **network_id**: Network identifier
+    - **expression_data**: Current expression data
+    - **baseline_data**: Optional baseline data for comparison
+    """
+    logger.info(f"Detecting anomalies for network: {network_id}")
+    
+    try:
+        result = anomaly_detector.detect_anomalies(
+            network_id=network_id,
+            expression_data=expression_data,
+            baseline_data=baseline_data
+        )
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error detecting anomalies: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Anomaly detection failed: {str(e)}"
+        )
 
 
 @app.post("/analysis/disease-prediction")
-async def predict_disease(network_id: str, expression_data: Dict[str, Any]):
-    """Predict disease association"""
-    # Placeholder - implement disease classification
-    return {"predictions": {}}
+async def predict_disease(
+    network_id: str,
+    expression_data: Dict[str, Any],
+    network_structure: Optional[Dict[str, Any]] = None
+):
+    """
+    Predict disease associations from network
+    
+    - **network_id**: Network identifier
+    - **expression_data**: Expression data
+    - **network_structure**: Optional network structure
+    """
+    logger.info(f"Predicting diseases for network: {network_id}")
+    
+    try:
+        result = disease_predictor.predict_disease(
+            network_id=network_id,
+            expression_data=expression_data,
+            network_structure=network_structure
+        )
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error predicting disease: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Disease prediction failed: {str(e)}"
+        )
 
 
 @app.get("/metrics")

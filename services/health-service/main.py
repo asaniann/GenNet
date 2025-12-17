@@ -19,6 +19,7 @@ from dependencies import get_current_user_id
 from recommendation_engine import RecommendationEngine
 from report_generator import ReportGenerator
 from service_clients import AnalysisServiceClient
+from monitoring import HealthMonitor
 
 # Configure structured logging
 logging.basicConfig(
@@ -57,6 +58,7 @@ logger = get_logger(__name__)
 recommendation_engine = RecommendationEngine()
 report_generator = ReportGenerator()
 analysis_client = AnalysisServiceClient()
+health_monitor = HealthMonitor()
 
 
 @app.on_event("startup")

@@ -1,50 +1,7 @@
 _format_version: "3.0"
 _transform: true
 
-services:
-  - name: auth-service
-    url: http://auth-service:8000
-    routes:
-      - name: auth-routes
-        paths:
-          - /api/v1/auth
-    
-  - name: grn-service
-    url: http://grn-service:8000
-    routes:
-      - name: grn-routes
-        paths:
-          - /api/v1/networks
-        plugins:
-          - name: jwt
-    
-  - name: workflow-service
-    url: http://workflow-service:8000
-    routes:
-      - name: workflow-routes
-        paths:
-          - /api/v1/workflows
-        plugins:
-          - name: jwt
-    
-  - name: collaboration-service
-    url: http://collaboration-service:8000
-    routes:
-      - name: collaboration-routes
-        paths:
-          - /api/v1/collaboration
-        plugins:
-          - name: jwt
-    
-  - name: metadata-service
-    url: http://metadata-service:8000
-    routes:
-      - name: metadata-routes
-        paths:
-          - /api/v1/metadata
-        plugins:
-          - name: jwt
-
+# Global plugins
 plugins:
   - name: cors
     config:
@@ -65,4 +22,223 @@ plugins:
         - Content-Type
         - Date
         - Authorization
+        - X-Correlation-ID
+        - X-Request-ID
+      exposed_headers:
+        - X-Correlation-ID
+        - X-Request-ID
+      credentials: true
+      max_age: 3600
+  - name: request-id
+    config:
+      header_name: X-Request-ID
+      echo_downstream: true
+  - name: correlation-id
+    config:
+      header_name: X-Correlation-ID
+      echo_downstream: true
+      generator: uuid
+
+# Services configuration
+services:
+  # Auth Service
+  - name: auth-service
+    url: http://auth-service:8000
+    connect_timeout: 60000
+    write_timeout: 60000
+    read_timeout: 60000
+    routes:
+      - name: auth-routes
+        paths:
+          - /api/v1/auth
+        strip_path: false
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 60
+              hour: 1000
+              policy: redis
+              redis:
+                host: redis
+                port: 6379
+          - name: request-size-limiting
+            config:
+              allowed_payload_size: 10
+          - name: response-transformer
+            config:
+              add:
+                headers:
+                  - "X-Service: auth-service"
+    
+  # GRN Service
+  - name: grn-service
+    url: http://grn-service:8000
+    connect_timeout: 60000
+    write_timeout: 60000
+    read_timeout: 60000
+    routes:
+      - name: grn-routes
+        paths:
+          - /api/v1/networks
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              secret_is_base64: false
+          - name: rate-limiting
+            config:
+              minute: 100
+              hour: 5000
+              policy: redis
+          - name: request-size-limiting
+            config:
+              allowed_payload_size: 50
+          - name: response-transformer
+            config:
+              add:
+                headers:
+                  - "X-Service: grn-service"
+    
+  # Workflow Service
+  - name: workflow-service
+    url: http://workflow-service:8000
+    connect_timeout: 120000
+    write_timeout: 120000
+    read_timeout: 120000
+    routes:
+      - name: workflow-routes
+        paths:
+          - /api/v1/workflows
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              secret_is_base64: false
+          - name: rate-limiting
+            config:
+              minute: 30
+              hour: 500
+              policy: redis
+          - name: request-size-limiting
+            config:
+              allowed_payload_size: 50
+          - name: response-transformer
+            config:
+              add:
+                headers:
+                  - "X-Service: workflow-service"
+    
+  # Qualitative Service
+  - name: qualitative-service
+    url: http://qualitative-service:8000
+    connect_timeout: 120000
+    write_timeout: 120000
+    read_timeout: 120000
+    routes:
+      - name: qualitative-routes
+        paths:
+          - /api/v1/qualitative
+        strip_path: false
+        plugins:
+          - name: jwt
+          - name: rate-limiting
+            config:
+              minute: 20
+              hour: 200
+              policy: redis
+    
+  # Hybrid Service
+  - name: hybrid-service
+    url: http://hybrid-service:8000
+    connect_timeout: 120000
+    write_timeout: 120000
+    read_timeout: 120000
+    routes:
+      - name: hybrid-routes
+        paths:
+          - /api/v1/hybrid
+        strip_path: false
+        plugins:
+          - name: jwt
+          - name: rate-limiting
+            config:
+              minute: 20
+              hour: 200
+              policy: redis
+    
+  # ML Service
+  - name: ml-service
+    url: http://ml-service:8000
+    connect_timeout: 180000
+    write_timeout: 180000
+    read_timeout: 180000
+    routes:
+      - name: ml-routes
+        paths:
+          - /api/v1/ml
+        strip_path: false
+        plugins:
+          - name: jwt
+          - name: rate-limiting
+            config:
+              minute: 10
+              hour: 100
+              policy: redis
+    
+  # Health Service
+  - name: health-service
+    url: http://health-service:8000
+    connect_timeout: 120000
+    write_timeout: 120000
+    read_timeout: 120000
+    routes:
+      - name: health-routes
+        paths:
+          - /api/v1/health
+        strip_path: false
+        plugins:
+          - name: jwt
+          - name: rate-limiting
+            config:
+              minute: 30
+              hour: 500
+              policy: redis
+    
+  # Collaboration Service
+  - name: collaboration-service
+    url: http://collaboration-service:8000
+    routes:
+      - name: collaboration-routes
+        paths:
+          - /api/v1/collaboration
+        strip_path: false
+        plugins:
+          - name: jwt
+          - name: rate-limiting
+            config:
+              minute: 100
+              hour: 2000
+              policy: redis
+    
+  # Metadata Service
+  - name: metadata-service
+    url: http://metadata-service:8000
+    routes:
+      - name: metadata-routes
+        paths:
+          - /api/v1/metadata
+        strip_path: false
+        plugins:
+          - name: jwt
+          - name: rate-limiting
+            config:
+              minute: 100
+              hour: 2000
+              policy: redis
+
+# Consumers (API keys)
+consumers:
+  - username: gennet-client
+    keyauth_credentials:
+      - key: ${GENNET_API_KEY}
 

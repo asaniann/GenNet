@@ -1,0 +1,65 @@
+# Chaos Engineering Experiments
+# Using Chaos Mesh for controlled failure injection
+
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: network-delay-experiment
+  namespace: gennet-system
+spec:
+  action: delay
+  mode: one
+  selector:
+    namespaces:
+      - gennet-system
+    labelSelectors:
+      app: grn-service
+  delay:
+    latency: "100ms"
+    correlation: "100"
+    jitter: "0ms"
+  duration: "5m"
+  scheduler:
+    cron: "@every 24h"
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: network-partition-experiment
+  namespace: gennet-system
+spec:
+  action: partition
+  mode: one
+  selector:
+    namespaces:
+      - gennet-system
+    labelSelectors:
+      app: auth-service
+  direction: both
+  target:
+    selector:
+      namespaces:
+        - gennet-system
+      labelSelectors:
+        app: postgres
+  duration: "2m"
+  scheduler:
+    cron: "@every 48h"
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: pod-failure-experiment
+  namespace: gennet-system
+spec:
+  action: pod-failure
+  mode: one
+  selector:
+    namespaces:
+      - gennet-system
+    labelSelectors:
+      app: workflow-service
+  duration: "1m"
+  scheduler:
+    cron: "@every 72h"
+
