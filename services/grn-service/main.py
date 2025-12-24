@@ -12,7 +12,10 @@ import uuid
 from datetime import datetime
 import os
 
-from models import GRNNetwork, GRNNetworkCreate, GRNNetworkResponse, Node, Edge
+from models import (
+    GRNNetwork, GRNNetworkCreate, GRNNetworkResponse, Node, Edge,
+    PatientGRN, PatientGRNCreate, PatientGRNResponse
+)
 from database import get_db, init_db
 from neo4j_client import Neo4jClient
 from s3_client import S3Client
@@ -340,6 +343,237 @@ async def export_network(
     # This is a placeholder - implement actual export logic
     
     return {"message": "Export functionality to be implemented"}
+
+
+@app.post("/patient/{patient_id}/build", response_model=PatientGRNResponse, status_code=status.HTTP_201_CREATED)
+async def build_patient_grn(
+    patient_id: str,
+    request: PatientGRNCreate,
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """
+    Build patient-specific GRN
+    
+    - **patient_id**: Patient ID
+    - **method**: Construction method ("reference", "de_novo", "hybrid")
+    - **reference_grn_id**: Optional reference GRN ID
+    """
+    logger.info(f"Building patient-specific GRN for patient: {patient_id}, method: {request.method}")
+    
+    from patient_grn_builder import PatientGRNBuilder
+    
+    builder = PatientGRNBuilder()
+    
+    # Build patient GRN
+    grn_result = await builder.build_patient_grn(
+        patient_id=patient_id,
+        method=request.method,
+        reference_grn_id=request.reference_grn_id
+    )
+    
+    # Create network in database
+    network = GRNNetwork(
+        id=str(uuid.uuid4()),
+        name=f"Patient {patient_id} GRN ({request.method})",
+        description=f"Patient-specific GRN built using {request.method} method",
+        owner_id=user_id,
+        created_at=datetime.utcnow()
+    )
+    db.add(network)
+    db.flush()
+    
+    # Store in Neo4j
+    if neo4j_client:
+        try:
+            nodes = [Node(**node) for node in grn_result["nodes"]]
+            edges = [Edge(**edge) for edge in grn_result["edges"]]
+            neo4j_client.create_network(network.id, nodes, edges)
+        except Exception as e:
+            logger.error(f"Error storing network in Neo4j: {e}")
+    
+    # Create PatientGRN record
+    patient_grn = PatientGRN(
+        id=str(uuid.uuid4()),
+        patient_id=patient_id,
+        network_id=network.id,
+        method=request.method,
+        reference_grn_id=request.reference_grn_id,
+        created_at=datetime.utcnow()
+    )
+    db.add(patient_grn)
+    db.commit()
+    db.refresh(patient_grn)
+    
+    # Load network data for response
+    if neo4j_client:
+        try:
+            graph_data = neo4j_client.get_network(network.id)
+            network.nodes = graph_data.get("nodes", [])
+            network.edges = graph_data.get("edges", [])
+        except Exception as e:
+            logger.error(f"Error loading network from Neo4j: {e}")
+    
+    response = PatientGRNResponse(
+        id=patient_grn.id,
+        patient_id=patient_grn.patient_id,
+        network_id=patient_grn.network_id,
+        method=patient_grn.method,
+        reference_grn_id=patient_grn.reference_grn_id,
+        created_at=patient_grn.created_at,
+        network=GRNNetworkResponse(
+            id=network.id,
+            name=network.name,
+            description=network.description,
+            owner_id=network.owner_id,
+            created_at=network.created_at,
+            updated_at=network.updated_at,
+            nodes=network.nodes,
+            edges=network.edges
+        )
+    )
+    
+    return response
+
+
+@app.get("/patient/{patient_id}/networks", response_model=List[PatientGRNResponse])
+async def get_patient_networks(
+    patient_id: str,
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """Get all GRN networks for a patient"""
+    patient_grns = db.query(PatientGRN).filter(
+        PatientGRN.patient_id == patient_id
+    ).order_by(PatientGRN.created_at.desc()).all()
+    
+    results = []
+    for pg in patient_grns:
+        network = db.query(GRNNetwork).filter(GRNNetwork.id == pg.network_id).first()
+        if network:
+            # Load from Neo4j
+            if neo4j_client:
+                try:
+                    graph_data = neo4j_client.get_network(network.id)
+                    network.nodes = graph_data.get("nodes", [])
+                    network.edges = graph_data.get("edges", [])
+                except Exception as e:
+                    logger.error(f"Error loading network from Neo4j: {e}")
+            
+            results.append(PatientGRNResponse(
+                id=pg.id,
+                patient_id=pg.patient_id,
+                network_id=pg.network_id,
+                method=pg.method,
+                reference_grn_id=pg.reference_grn_id,
+                created_at=pg.created_at,
+                network=GRNNetworkResponse(
+                    id=network.id,
+                    name=network.name,
+                    description=network.description,
+                    owner_id=network.owner_id,
+                    created_at=network.created_at,
+                    updated_at=network.updated_at,
+                    nodes=network.nodes,
+                    edges=network.edges
+                )
+            ))
+    
+    return results
+
+
+@app.post("/patient/{patient_id}/compare", response_model=Dict[str, Any])
+async def compare_patient_grn(
+    patient_id: str,
+    network_id1: str,
+    network_id2: Optional[str] = None,
+    reference_grn_id: Optional[str] = None,
+    analyze_perturbations: bool = True,
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """
+    Compare patient GRN with another network or reference
+    
+    - **patient_id**: Patient ID
+    - **network_id1**: First network ID (patient GRN)
+    - **network_id2**: Optional second network ID to compare
+    - **reference_grn_id**: Optional reference GRN ID to compare
+    - **analyze_perturbations**: Whether to perform perturbation analysis
+    """
+    logger.info(f"Comparing GRN for patient: {patient_id}")
+    
+    # Get patient network
+    patient_grn = db.query(PatientGRN).filter(
+        PatientGRN.patient_id == patient_id,
+        PatientGRN.network_id == network_id1
+    ).first()
+    
+    if not patient_grn:
+        raise NotFoundError("PatientGRN", f"{patient_id}/{network_id1}")
+    
+    # Get network graphs
+    if neo4j_client:
+        try:
+            patient_graph = neo4j_client.get_network(network_id1)
+            
+            comparison = {
+                "patient_id": patient_id,
+                "patient_network_id": network_id1,
+                "patient_network": {
+                    "num_nodes": len(patient_graph.get("nodes", [])),
+                    "num_edges": len(patient_graph.get("edges", []))
+                }
+            }
+            
+            if network_id2 or reference_grn_id:
+                reference_id = network_id2 or reference_grn_id
+                reference_graph = neo4j_client.get_network(reference_id)
+                comparison["reference_network_id"] = reference_id
+                comparison["reference_network"] = {
+                    "num_nodes": len(reference_graph.get("nodes", [])),
+                    "num_edges": len(reference_graph.get("edges", []))
+                }
+                
+                # Calculate similarity
+                comparison["similarity"] = _calculate_network_similarity(
+                    patient_graph, reference_graph
+                )
+                
+                # Perform perturbation analysis if requested
+                if analyze_perturbations:
+                    from perturbation_analyzer import PerturbationAnalyzer
+                    analyzer = PerturbationAnalyzer()
+                    comparison["perturbation_analysis"] = analyzer.analyze_perturbations(
+                        patient_graph, reference_graph
+                    )
+            
+            return comparison
+        except Exception as e:
+            logger.error(f"Error comparing networks: {e}")
+            raise HTTPException(status_code=500, detail=f"Error comparing networks: {str(e)}")
+    
+    raise HTTPException(status_code=500, detail="Neo4j client not available")
+
+
+def _calculate_network_similarity(
+    graph1: Dict[str, Any],
+    graph2: Dict[str, Any]
+) -> Dict[str, float]:
+    """Calculate similarity metrics between two networks"""
+    edges1 = {(e["source"], e["target"]): e for e in graph1.get("edges", [])}
+    edges2 = {(e["source"], e["target"]): e for e in graph2.get("edges", [])}
+    
+    common_edges = set(edges1.keys()) & set(edges2.keys())
+    all_edges = set(edges1.keys()) | set(edges2.keys())
+    
+    jaccard_similarity = len(common_edges) / len(all_edges) if all_edges else 0.0
+    
+    return {
+        "jaccard_similarity": jaccard_similarity,
+        "common_edges": len(common_edges),
+        "total_unique_edges": len(all_edges)
+    }
 
 
 @app.get("/health/live")

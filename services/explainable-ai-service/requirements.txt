@@ -1,0 +1,25 @@
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+sqlalchemy==2.0.23
+psycopg2-binary==2.9.9
+pydantic==2.5.0
+python-jose[cryptography]==3.3.0
+httpx==0.25.0
+
+# Explainable AI
+shap>=0.42.0
+lime>=0.2.0
+
+# Visualization
+matplotlib>=3.7.0
+seaborn>=0.12.0
+Pillow>=10.0.0
+
+# Data processing
+pandas>=2.0.0
+numpy>=1.24.0
+scikit-learn>=1.3.0
+
+# Image handling
+base64
+

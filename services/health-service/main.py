@@ -95,6 +95,24 @@ async def generate_health_report(
         token
     )
     
+    # Get explanations for predictions (if ensemble prediction exists)
+    explanations = {}
+    ensemble_pred = predictions.get("ensemble")
+    if ensemble_pred and ensemble_pred.get("risk_score") is not None:
+        try:
+            explanation = await analysis_client.get_explanation(
+                prediction_id=f"ensemble_{patient_id}_{datetime.utcnow().isoformat()}",
+                patient_id=patient_id,
+                prediction_value=ensemble_pred.get("risk_score", 0.0),
+                features=ensemble_pred.get("features", {}),
+                method="shap",
+                token=token
+            )
+            if explanation:
+                explanations["ensemble"] = explanation
+        except Exception as e:
+            logger.warning(f"Could not get explanation: {e}")
+    
     # Generate recommendations
     recommendations = recommendation_engine.generate_recommendations(
         predictions,
@@ -116,14 +134,35 @@ async def generate_health_report(
     db.commit()
     db.refresh(report)
     
-    # Generate report file in background
+    # Publish event to Kafka for real-time processing
+    try:
+        from shared.kafka_publisher import KafkaEventPublisher
+        KafkaEventPublisher.publish_event(
+            topic="patient-events",
+            event={
+                "patient_id": patient_id,
+                "event_type": "prediction",
+                "event_data": {
+                    "report_id": report.id,
+                    "report_type": request.report_type,
+                    "ensemble_prediction": predictions.get("ensemble"),
+                    "has_explanations": bool(explanations)
+                }
+            },
+            key=patient_id
+        )
+    except Exception as e:
+        logger.warning(f"Could not publish event to Kafka: {e}")
+    
+    # Generate report file in background (include explanations)
     background_tasks.add_task(
         generate_report_file,
         report.id,
         patient_id,
         predictions,
         recommendations,
-        request.format
+        request.format,
+        explanations
     )
     
     return report
@@ -134,7 +173,8 @@ def generate_report_file(
     patient_id: str,
     predictions: Dict,
     recommendations: List[Dict],
-    format: str
+    format: str,
+    explanations: Optional[Dict] = None
 ):
     """Background task to generate report file"""
     from database import SessionLocal
@@ -151,12 +191,12 @@ def generate_report_file(
         
         if format == "pdf":
             with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
-                if report_generator.generate_pdf_report(patient_id, predictions, recommendations, tmp_file.name):
+                if report_generator.generate_pdf_report(patient_id, predictions, recommendations, tmp_file.name, explanations):
                     s3_key = f"health-reports/{report_id}/report.pdf"
                     s3_client.s3_client.upload_file(tmp_file.name, s3_client.bucket_name, s3_key)
                     report.report_file_s3_key = s3_key
         elif format == "json":
-            json_data = report_generator.generate_json_report(patient_id, predictions, recommendations)
+            json_data = report_generator.generate_json_report(patient_id, predictions, recommendations, explanations)
             import json as json_lib
             with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as tmp_file:
                 json_lib.dump(json_data, tmp_file)

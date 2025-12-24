@@ -132,22 +132,44 @@ async def create_patient(
 async def list_patients(
     skip: int = 0,
     limit: int = 100,
+    search: Optional[str] = None,
+    sort_by: Optional[str] = None,
+    sort_order: str = "asc",
     user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db)
 ):
     """
-    List all patients for the current user
+    List all patients for the current user with advanced search and filtering
     
     - **skip**: Number of records to skip (pagination)
     - **limit**: Maximum number of records to return (max 100)
+    - **search**: Full-text search term
+    - **sort_by**: Field to sort by
+    - **sort_order**: Sort order ("asc" or "desc")
     """
     if limit > 100:
         limit = 100
     
-    patients = db.query(Patient).filter(
+    from shared.search import AdvancedSearch
+    
+    query = db.query(Patient).filter(
         Patient.user_id == user_id,
         Patient.deleted_at.is_(None)  # Not soft-deleted
-    ).order_by(Patient.created_at.desc()).offset(skip).limit(limit).all()
+    )
+    
+    # Apply search
+    if search:
+        search_fields = ["anonymized_id", "age_range", "gender", "ethnicity"]
+        query = AdvancedSearch.apply_search(query, Patient, search, search_fields)
+    
+    # Apply sorting
+    if sort_by:
+        query = AdvancedSearch.apply_sorting(query, Patient, sort_by, sort_order)
+    else:
+        query = query.order_by(Patient.created_at.desc())
+    
+    # Apply pagination
+    patients = query.offset(skip).limit(limit).all()
     
     return patients
 
@@ -308,6 +330,26 @@ async def upload_patient_data(
     
     db.commit()
     
+    # Publish event to Kafka for real-time processing
+    try:
+        from shared.kafka_publisher import KafkaEventPublisher
+        KafkaEventPublisher.publish_event(
+            topic="patient-events",
+            event={
+                "patient_id": patient_id,
+                "event_type": "data_upload",
+                "event_data": {
+                    "upload_id": upload_id,
+                    "data_type": data_type,
+                    "file_format": file_format,
+                    "s3_key": s3_key
+                }
+            },
+            key=patient_id
+        )
+    except Exception as e:
+        logger.warning(f"Could not publish event to Kafka: {e}")
+    
     return DataUploadResponse(
         upload_id=upload_id,
         patient_id=patient_id,
@@ -359,6 +401,15 @@ async def readiness():
     
     status_code = 200 if all_ready else 503
     return JSONResponse(content=health_status, status_code=status_code)
+
+
+# Include GDPR data subject rights router
+try:
+    from data_subject_rights import router as gdpr_router
+    app.include_router(gdpr_router)
+    logger.info("GDPR data subject rights router included")
+except ImportError as e:
+    logger.warning(f"GDPR router not available: {e}")
 
 
 @app.get("/health")

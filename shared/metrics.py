@@ -51,6 +51,31 @@ active_workflows = Gauge(
     ['status']
 )
 
+# Business metrics for personalized health
+predictions_generated_total = Counter(
+    'health_predictions_generated_total',
+    'Total number of health predictions generated',
+    ['prediction_type', 'method']
+)
+
+patient_grns_built_total = Counter(
+    'patient_grns_built_total',
+    'Total number of patient-specific GRNs built',
+    ['method']
+)
+
+explanations_generated_total = Counter(
+    'explanations_generated_total',
+    'Total number of explanations generated',
+    ['method']
+)
+
+reports_generated_total = Counter(
+    'health_reports_generated_total',
+    'Total number of health reports generated',
+    ['format']
+)
+
 
 class PrometheusMiddleware(BaseHTTPMiddleware):
     """Middleware to track HTTP metrics for Prometheus"""

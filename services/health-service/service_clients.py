@@ -24,6 +24,7 @@ class AnalysisServiceClient:
         self.ml_service_url = os.getenv("ML_SERVICE_URL", "http://ml-service:8000")
         self.clinical_service_url = os.getenv("CLINICAL_DATA_SERVICE_URL", "http://clinical-data-service:8000")
         self.pharmacogenomics_service_url = os.getenv("PHARMACOGENOMICS_SERVICE_URL", "http://pharmacogenomics-service:8000")
+        self.xai_service_url = os.getenv("XAI_SERVICE_URL", "http://explainable-ai-service:8000")
         
         self.genomic_client = ServiceClient(base_url=self.genomic_service_url, timeout=60.0)
         self.expression_client = ServiceClient(base_url=self.expression_service_url, timeout=60.0)
@@ -31,6 +32,7 @@ class AnalysisServiceClient:
         self.ml_client = ServiceClient(base_url=self.ml_service_url, timeout=60.0)
         self.clinical_client = ServiceClient(base_url=self.clinical_service_url, timeout=30.0)
         self.pharmacogenomics_client = ServiceClient(base_url=self.pharmacogenomics_service_url, timeout=30.0)
+        self.xai_client = ServiceClient(base_url=self.xai_service_url, timeout=60.0)
     
     async def get_all_predictions(
         self,
@@ -154,6 +156,63 @@ class AnalysisServiceClient:
             predictions["ensemble"] = self._create_simple_ensemble(predictions)
         
         return predictions
+    
+    async def get_explanation(
+        self,
+        prediction_id: str,
+        patient_id: str,
+        prediction_value: float,
+        features: Dict[str, Any],
+        method: str = "shap",
+        token: str = ""
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get explanation for a prediction from XAI service
+        
+        Args:
+            prediction_id: Prediction ID
+            patient_id: Patient ID
+            prediction_value: Prediction value
+            features: Feature values
+            method: Explanation method ("shap", "lime", "both")
+            token: Auth token
+            
+        Returns:
+            Explanation dictionary or None
+        """
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        
+        try:
+            if method in ["shap", "both"]:
+                explanation = await self.xai_client.post(
+                    "/shap/explain",
+                    json={
+                        "prediction_id": prediction_id,
+                        "patient_id": patient_id,
+                        "prediction_value": prediction_value,
+                        "model_type": "ensemble",
+                        "features": features
+                    },
+                    headers=headers
+                )
+                return explanation
+            elif method == "lime":
+                explanation = await self.xai_client.post(
+                    "/lime/explain",
+                    json={
+                        "prediction_id": prediction_id,
+                        "patient_id": patient_id,
+                        "prediction_value": prediction_value,
+                        "features": features
+                    },
+                    headers=headers
+                )
+                return explanation
+        except Exception as e:
+            logger.warning(f"Could not get explanation from XAI service: {e}")
+            return None
+        
+        return None
     
     async def _get_patient_data_for_ml(
         self,

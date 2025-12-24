@@ -74,3 +74,47 @@ class GRNNetworkResponse(BaseModel):
     class Config:
         from_attributes = True
 
+
+class PatientGRN(Base):
+    """Patient-specific GRN database model"""
+    __tablename__ = "patient_grns"
+    __table_args__ = (
+        Index('idx_patient_grn_patient_id', 'patient_id'),
+        Index('idx_patient_grn_network_id', 'network_id'),
+        Index('idx_patient_grn_created_at', 'created_at'),
+    )
+    
+    id = Column(String, primary_key=True, index=True)
+    patient_id = Column(String, nullable=False, index=True)
+    network_id = Column(String, ForeignKey("grn_networks.id"), nullable=False, index=True)
+    method = Column(String, nullable=False)  # "reference", "de_novo", "hybrid"
+    reference_grn_id = Column(String, nullable=True)
+    
+    # Metadata
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationship
+    network = relationship("GRNNetwork", backref="patient_grns")
+
+
+class PatientGRNCreate(BaseModel):
+    """Patient GRN creation model"""
+    patient_id: str
+    method: str = "hybrid"  # "reference", "de_novo", "hybrid"
+    reference_grn_id: Optional[str] = None
+
+
+class PatientGRNResponse(BaseModel):
+    """Patient GRN response model"""
+    id: str
+    patient_id: str
+    network_id: str
+    method: str
+    reference_grn_id: Optional[str]
+    created_at: datetime
+    network: Optional[GRNNetworkResponse] = None
+    
+    class Config:
+        from_attributes = True
+

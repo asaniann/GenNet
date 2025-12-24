@@ -62,6 +62,36 @@ class ReportGenerator:
                 c.drawString(1.2*inch, y_pos, f"Overall Risk Score: {risk_score:.1f}")
                 y_pos -= 0.2*inch
             
+            # Explanations section (if available)
+            if explanations and explanations.get("ensemble"):
+                y_pos -= 0.3*inch
+                c.setFont("Helvetica-Bold", 14)
+                c.drawString(1*inch, y_pos, "Prediction Explanation")
+                
+                y_pos -= 0.3*inch
+                c.setFont("Helvetica", 10)
+                
+                explanation = explanations["ensemble"]
+                nlp_explanation = explanation.get("nlp_explanation", "")
+                if nlp_explanation:
+                    # Wrap text for PDF
+                    words = nlp_explanation.split()
+                    line = ""
+                    for word in words:
+                        if len(line + word) < 60:
+                            line += word + " "
+                        else:
+                            c.drawString(1.2*inch, y_pos, line)
+                            y_pos -= 0.2*inch
+                            line = word + " "
+                    if line:
+                        c.drawString(1.2*inch, y_pos, line)
+                        y_pos -= 0.2*inch
+                
+                if y_pos < 1*inch:
+                    c.showPage()
+                    y_pos = height - 1*inch
+            
             # Recommendations section
             y_pos -= 0.3*inch
             c.setFont("Helvetica-Bold", 14)
@@ -88,16 +118,22 @@ class ReportGenerator:
         self,
         patient_id: str,
         predictions: Dict,
-        recommendations: List[Dict]
+        recommendations: List[Dict],
+        explanations: Optional[Dict] = None
     ) -> Dict[str, Any]:
         """Generate JSON health report"""
-        return {
+        report = {
             "patient_id": patient_id,
             "generated_at": datetime.utcnow().isoformat(),
             "predictions": predictions,
             "recommendations": recommendations,
             "summary": self._create_summary(predictions, recommendations)
         }
+        
+        if explanations:
+            report["explanations"] = explanations
+        
+        return report
     
     def generate_html_report(
         self,

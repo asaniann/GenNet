@@ -1,0 +1,75 @@
+# Prometheus alert rules for GenNet services
+
+groups:
+  - name: service_health
+    interval: 30s
+    rules:
+      - alert: ServiceDown
+        expr: up{job=~".*-service"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+          description: "Service {{ $labels.job }} has been down for more than 1 minute"
+      
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status_code=~"5.."}[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate in {{ $labels.job }}"
+          description: "Error rate is {{ $value | humanizePercentage }} for service {{ $labels.job }}"
+      
+      - alert: HighLatency
+        expr: histogram_quantile(0.95, http_request_duration_seconds) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High latency in {{ $labels.job }}"
+          description: "95th percentile latency is {{ $value }}s for service {{ $labels.job }}"
+  
+  - name: business_metrics
+    interval: 1m
+    rules:
+      - alert: PredictionFailureRate
+        expr: rate(health_predictions_generated_total{status="failed"}[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High prediction failure rate"
+          description: "Prediction failure rate is {{ $value | humanizePercentage }}"
+      
+      - alert: LowPredictionGeneration
+        expr: rate(health_predictions_generated_total[1h]) < 0.1
+        for: 30m
+        labels:
+          severity: info
+        annotations:
+          summary: "Low prediction generation rate"
+          description: "Prediction generation rate is below expected threshold"
+  
+  - name: resource_usage
+    interval: 1m
+    rules:
+      - alert: HighMemoryUsage
+        expr: container_memory_usage_bytes / container_spec_memory_limit_bytes > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage in {{ $labels.pod }}"
+          description: "Memory usage is {{ $value | humanizePercentage }} for {{ $labels.pod }}"
+      
+      - alert: HighCPUUsage
+        expr: rate(container_cpu_usage_seconds_total[5m]) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage in {{ $labels.pod }}"
+          description: "CPU usage is {{ $value | humanizePercentage }} for {{ $labels.pod }}"
+

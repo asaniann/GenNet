@@ -1,0 +1,29 @@
+# Kafka broker configuration
+broker.id=1
+listeners=PLAINTEXT://0.0.0.0:9092,PLAINTEXT_INTERNAL://0.0.0.0:29092
+advertised.listeners=PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
+listener.security.protocol.map=PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+inter.broker.listener.name=PLAINTEXT_INTERNAL
+
+# Zookeeper
+zookeeper.connect=zookeeper:2181
+zookeeper.connection.timeout.ms=18000
+
+# Logs
+log.dirs=/var/lib/kafka/data
+num.partitions=3
+default.replication.factor=1
+min.insync.replicas=1
+
+# Performance
+num.network.threads=8
+num.io.threads=8
+socket.send.buffer.bytes=102400
+socket.receive.buffer.bytes=102400
+socket.request.max.bytes=104857600
+
+# Log retention
+log.retention.hours=168
+log.segment.bytes=1073741824
+log.retention.check.interval.ms=300000
+
