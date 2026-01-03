@@ -12,6 +12,7 @@ const TabsContext = createContext<TabsContextValue | null>(null)
 export interface TabsProps {
   children: React.ReactNode
   defaultTab?: string
+  value?: string
   onChange?: (tabId: string) => void
   className?: string
   variant?: 'default' | 'pills' | 'underline'
@@ -20,14 +21,19 @@ export interface TabsProps {
 export const Tabs: React.FC<TabsProps> = ({
   children,
   defaultTab,
+  value,
   onChange,
   className = '',
   variant = 'default',
 }) => {
-  const [activeTab, setActiveTab] = useState(defaultTab || '')
+  const [internalActiveTab, setInternalActiveTab] = useState(defaultTab || '')
+  
+  const activeTab = value !== undefined ? value : internalActiveTab
 
   const handleTabChange = (tabId: string) => {
-    setActiveTab(tabId)
+    if (value === undefined) {
+      setInternalActiveTab(tabId)
+    }
     onChange?.(tabId)
   }
 

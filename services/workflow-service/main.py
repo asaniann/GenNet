@@ -150,6 +150,33 @@ async def get_workflow_results(
     return {"results": workflow.results}
 
 
+@app.post("/workflows/{workflow_id}/cancel")
+async def cancel_workflow(
+    workflow_id: str,
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """Cancel a running workflow"""
+    workflow = db.query(Workflow).filter(
+        Workflow.id == workflow_id,
+        Workflow.owner_id == user_id
+    ).first()
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    
+    if workflow.status not in [JobStatus.PENDING, JobStatus.RUNNING]:
+        raise HTTPException(status_code=400, detail="Workflow cannot be cancelled")
+    
+    workflow.status = JobStatus.CANCELLED
+    workflow.updated_at = datetime.utcnow()
+    db.commit()
+    
+    # TODO: Actually cancel the running workflow in the engine
+    # workflow_engine.cancel_workflow(workflow_id)
+    
+    return {"message": "Workflow cancelled successfully"}
+
+
 @app.get("/metrics")
 async def metrics():
     """Prometheus metrics endpoint"""

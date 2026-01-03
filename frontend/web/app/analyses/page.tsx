@@ -356,25 +356,21 @@ export default function AnalysesPage() {
             title="Qualitative"
             value={stats.qualitative}
             icon={<span className="text-xl">🔬</span>}
-            iconColor="blue"
           />
           <StatCard
             title="ML Predictions"
             value={stats.ml}
             icon={<span className="text-xl">🤖</span>}
-            iconColor="green"
           />
           <StatCard
             title="Simulations"
             value={stats.simulation}
             icon={<span className="text-xl">📊</span>}
-            iconColor="purple"
           />
           <StatCard
             title="Hybrid"
             value={stats.hybrid}
             icon={<span className="text-xl">🧬</span>}
-            iconColor="amber"
           />
         </div>
 
@@ -534,7 +530,7 @@ export default function AnalysesPage() {
                             <span className="text-sm text-slate-500 dark:text-slate-400">Model Accuracy</span>
                             <span className="text-sm font-semibold text-green-600">{analysis.accuracy}%</span>
                           </div>
-                          <ProgressBar value={analysis.accuracy} size="sm" color="success" />
+                          <ProgressBar value={analysis.accuracy} size="sm" color="green" />
                         </div>
                       )}
                     </div>

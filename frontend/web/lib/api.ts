@@ -30,6 +30,7 @@ export const workflowApi = {
   create: (data: any) => api.post('/api/v1/workflows', data),
   getStatus: (id: string) => api.get(`/api/v1/workflows/${id}/status`),
   getResults: (id: string) => api.get(`/api/v1/workflows/${id}/results`),
+  cancel: (id: string) => api.post(`/api/v1/workflows/${id}/cancel`),
 }
 
 export const authApi = {

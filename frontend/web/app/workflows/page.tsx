@@ -326,11 +326,11 @@ export default function WorkflowsPage() {
           {workflow.status === 'running' ? (
             <ProgressBar value={workflow.progress} size="sm" animated />
           ) : workflow.status === 'completed' ? (
-            <ProgressBar value={100} size="sm" color="success" />
+            <ProgressBar value={100} size="sm" color="green" />
           ) : workflow.status === 'failed' ? (
-            <ProgressBar value={workflow.progress} size="sm" color="danger" />
+            <ProgressBar value={workflow.progress} size="sm" color="red" />
           ) : (
-            <ProgressBar value={0} size="sm" color="gray" />
+            <ProgressBar value={0} size="sm" color="blue" />
           )}
         </div>
       ),
@@ -443,14 +443,11 @@ export default function WorkflowsPage() {
           <StatCard
             title="Running"
             value={stats.running}
-            change={stats.running > 0 ? 'Active' : undefined}
-            trend={stats.running > 0 ? 'up' : undefined}
             icon={
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
             }
-            iconColor="blue"
           />
           <StatCard
             title="Completed"
@@ -460,7 +457,6 @@ export default function WorkflowsPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             }
-            iconColor="green"
           />
           <StatCard
             title="Failed"
@@ -470,7 +466,6 @@ export default function WorkflowsPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             }
-            iconColor="red"
           />
         </div>
 
@@ -479,10 +474,10 @@ export default function WorkflowsPage() {
           <Tabs value={activeTab} onChange={setActiveTab}>
             <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-4">
               <TabList>
-                <Tab value="all">All ({workflows.length})</Tab>
-                <Tab value="running">Running ({stats.running})</Tab>
-                <Tab value="completed">Completed ({stats.completed})</Tab>
-                <Tab value="failed">Failed ({stats.failed})</Tab>
+                <Tab id="all">All ({workflows.length})</Tab>
+                <Tab id="running">Running ({stats.running})</Tab>
+                <Tab id="completed">Completed ({stats.completed})</Tab>
+                <Tab id="failed">Failed ({stats.failed})</Tab>
               </TabList>
               <div className="flex flex-col sm:flex-row gap-3">
                 <SearchInput

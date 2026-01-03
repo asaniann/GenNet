@@ -12,7 +12,6 @@ import ReactFlow, {
   useEdgesState,
   Connection,
   MarkerType,
-  Panel,
   NodeTypes,
   EdgeTypes,
   ReactFlowInstance,

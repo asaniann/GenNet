@@ -2,7 +2,7 @@
 
 import React from 'react'
 
-type BadgeVariant = 'default' | 'primary' | 'secondary' | 'success' | 'warning' | 'error' | 'info'
+type BadgeVariant = 'default' | 'primary' | 'secondary' | 'success' | 'warning' | 'danger' | 'info'
 type BadgeSize = 'sm' | 'md' | 'lg'
 
 export interface BadgeProps {
@@ -21,7 +21,7 @@ const variantClasses: Record<BadgeVariant, string> = {
   secondary: 'bg-purple-100 text-purple-800 dark:bg-purple-900/50 dark:text-purple-200',
   success: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200',
   warning: 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200',
-  error: 'bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-200',
+  danger: 'bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-200',
   info: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/50 dark:text-cyan-200',
 }
 
@@ -31,7 +31,7 @@ const dotClasses: Record<BadgeVariant, string> = {
   secondary: 'bg-purple-500',
   success: 'bg-emerald-500',
   warning: 'bg-amber-500',
-  error: 'bg-red-500',
+  danger: 'bg-red-500',
   info: 'bg-cyan-500',
 }
 

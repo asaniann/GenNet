@@ -108,7 +108,7 @@ export default function Home() {
       case 'started':
         return <Badge variant="warning">Started</Badge>
       case 'failed':
-        return <Badge variant="error">Failed</Badge>
+        return <Badge variant="danger">Failed</Badge>
       default:
         return <Badge>{action}</Badge>
     }
